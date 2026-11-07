@@ -6,7 +6,7 @@
  * 依赖：constants.js（可选，存在时读取 STORAGE_KEY 与 RECORD_TYPES）
  * 引入：<script src="js/constants.js"></script> 之后、其他业务脚本之前
  *
- * 对外接口（V1.0 规范 3.4 节）：
+ * 对外接口（V1.0 规范第 4 节）：
  *   LedgerStorage.getRecords()               -> Array   全部记录，按日期倒序，返回副本
  *   LedgerStorage.addRecord(record)          -> Object  新增，返回带 id 的记录
  *   LedgerStorage.updateRecord(id, record)   -> Object  更新，返回更新后记录；找不到返回 null
@@ -21,8 +21,10 @@
  *   新增 / 修改 / 删除 / 整体替换导入 / 首次初始化示例数据 成功后，
  *   在 document 上派发 'ledger:updated'，detail = { action, payload }
  *   action 取值：add | update | delete | replace | seed
+ *   ⚠ 事件由本模块统一派发，S2/S3/S8 不要再自己 dispatch 一次，
+ *     否则同一操作会触发两轮刷新（列表渲染两遍、提示弹两次）。
  *
- * 统一数据结构（V1.0 2 节，字段名不得修改）：
+ * 统一数据结构（V1.0 规范第 2 节，字段名不得修改）：
  *   { id: "record_001", type: "expense", amount: 25.00,
  *     category: "餐饮", date: "2026-11-07", note: "午餐" }
  *   本模块额外维护 createdAt / updatedAt 两个时间戳，其他模块可忽略。
@@ -300,7 +302,7 @@
   }
 
   /**
-   * 仅当库为空时初始化示例数据（V1.0 3.11）
+   * 仅当库为空时初始化示例数据（V1.0 规范第 11 节）
    * @param {Array} [records] 不传时自动取 Ledger.DemoData.getRecords()；
    *                          demo-data.js 未加载时不写入，返回 0
    * @returns {Number} 实际写入条数
