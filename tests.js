@@ -55,6 +55,33 @@ const RESULTS = [];
 
 function defTest(suite, name, fn) { SUITES[suite].push({ name, fn }); }
 
+// 运行前备份真实数据、运行后恢复（含中途报错，finally 保证恢复）。
+// 测试面板绝不允许污染用户的真实账单（组长 PR 审核意见 #1）。
+const _STORE_KEY = (_STORAGE.KEY) || 'ledger_records';
+
+function _snapshotData() {
+  if (typeof localStorage !== 'undefined') {
+    try { return { raw: localStorage.getItem(_STORE_KEY) }; } catch (e) { /* 降级走 API 快照 */ }
+  }
+  if (_STORAGE.getRecords) {
+    try { return { api: _STORAGE.getRecords() }; } catch (e) { /* 忽略 */ }
+  }
+  return null;
+}
+
+function _restoreData(snap) {
+  if (!snap) return;
+  if (Object.prototype.hasOwnProperty.call(snap, 'raw')) {
+    if (typeof localStorage === 'undefined') return;
+    try {
+      if (snap.raw === null) localStorage.removeItem(_STORE_KEY);
+      else localStorage.setItem(_STORE_KEY, snap.raw);
+    } catch (e) { /* 尽力恢复 */ }
+  } else if (snap.api && _STORAGE.saveRecords) {
+    try { _STORAGE.saveRecords(snap.api); } catch (e) { /* 尽力恢复 */ }
+  }
+}
+
 function _runOne(t) {
   try { t.fn(); RESULTS.push({ name: t.name, ok: true, msg: '通过' }); }
   catch (e) { RESULTS.push({ name: t.name, ok: false, msg: e.message }); }
@@ -62,13 +89,17 @@ function _runOne(t) {
 
 function runSuite(suite) {
   RESULTS.length = 0;
-  SUITES[suite].forEach(_runOne);
+  const snap = _snapshotData();
+  try { SUITES[suite].forEach(_runOne); }
+  finally { _restoreData(snap); }
   return renderResults();
 }
 
 function runAllSuites() {
   RESULTS.length = 0;
-  Object.keys(SUITES).forEach(s => SUITES[s].forEach(_runOne));
+  const snap = _snapshotData();
+  try { Object.keys(SUITES).forEach(s => SUITES[s].forEach(_runOne)); }
+  finally { _restoreData(snap); }
   return renderResults();
 }
 
@@ -117,31 +148,32 @@ defTest('storage', 'storage：addRecord 后 getRecords 能读到新记录', () =
   assert(all.some(x => x.id === r.id), '刚添加的记录应该在列表里');
 });
 
-defTest('storage', 'storage：deleteRecord 删除后记录消失，返回 true', () => {
+defTest('storage', 'storage：deleteRecord 删除后记录消失（V1.0 第4节：返回 true/false）', () => {
   assert(_STORAGE.addRecord && _STORAGE.deleteRecord && _STORAGE.getRecords, 'LedgerStorage 接口未定义');
   const r = _STORAGE.addRecord(makeRecord());
   const ok = _STORAGE.deleteRecord(r.id);
-  assert(ok === true, '删除已存在的记录应返回 true');
+  assert(ok === true, '删除已存在的记录应返回 true（规范第4节明确约定）');
   assert(!_STORAGE.getRecords().some(x => x.id === r.id), '删除后记录不应再出现');
-  assert(_STORAGE.deleteRecord('不存在的id') === false, '删除不存在的记录应返回 false');
+  assert(_STORAGE.deleteRecord('不存在的id') === false, '删除不存在的记录应返回 false（规范第4节明确约定）');
 });
 
-defTest('storage', 'storage：updateRecord 能修改已有记录，找不到返回 null', () => {
+defTest('storage', 'storage：updateRecord 能修改已有记录，找不到返回 null（V1.0 第4节）', () => {
   assert(_STORAGE.addRecord && _STORAGE.updateRecord && _STORAGE.getRecords, 'LedgerStorage 接口未定义');
   const r = _STORAGE.addRecord(makeRecord({ amount: 10, note: '改之前' }));
   const updated = _STORAGE.updateRecord(r.id, { amount: 99, note: '改之后' });
   assert(updated, 'updateRecord 应返回更新后的记录');
   assert(Math.abs(updated.amount - 99) < 1e-9 && updated.note === '改之后', '更新后的字段值应生效');
-  assert(_STORAGE.updateRecord('不存在的id', { amount: 1 }) === null, '更新不存在的 id 应返回 null');
+  assert(_STORAGE.updateRecord('不存在的id', { amount: 1 }) === null, '更新不存在的 id 应返回 null（规范第4节明确约定）');
 });
 
-defTest('storage', 'storage：seedIfEmpty 仅空库时写入演示数据', () => {
+defTest('storage', 'storage：seedIfEmpty 仅空库时写入演示数据（规范未约定返回值，只断言数据状态）', () => {
   assert(_STORAGE.saveRecords && _STORAGE.seedIfEmpty && _STORAGE.getRecords, 'LedgerStorage 接口未定义');
-  _STORAGE.saveRecords([]);
-  const seeded = _STORAGE.seedIfEmpty([makeRecord({ id: 'seed_1', note: '演示数据' })]);
-  assert(seeded > 0, '空库时 seedIfEmpty 应写入数据');
-  assert(_STORAGE.getRecords().some(x => x.id === 'seed_1'), 'seedIfEmpty 写入的演示数据应可读回');
-  assert(_STORAGE.seedIfEmpty([makeRecord({ id: 'seed_2' })]) === 0, '非空库时 seedIfEmpty 不应再写入');
+  _STORAGE.saveRecords([]);   // 清空；整轮测试结束会自动恢复原始数据（见数据保护）
+  _STORAGE.seedIfEmpty([makeRecord({ id: 'seed_1', note: '演示数据' })]);
+  assert(_STORAGE.getRecords().some(x => x.id === 'seed_1'), '空库时 seedIfEmpty 写入的演示数据应可读回');
+  const count = _STORAGE.getRecords().length;
+  _STORAGE.seedIfEmpty([makeRecord({ id: 'seed_2' })]);
+  assert(_STORAGE.getRecords().length === count, '非空库时 seedIfEmpty 不应再写入');
 });
 
 defTest('storage', 'storage：刷新持久化（重新读取数据仍在）', () => {
@@ -220,18 +252,22 @@ defTest('form', 'form：超两位小数/科学计数法应被拒绝（S2 校验�
   }
 });
 
-defTest('form', 'form：必填项缺失应被拒绝并给出错误提示', () => {
+defTest('form', 'form：必填项缺失应被拒绝（valid 严格校验；errors 结构按 S2 最终接口文档“有则检查”）', () => {
   assert(_FORM.validate, 'Ledger.Form.validate 未定义');
   const bad = _FORM.validate({ type: 'expense', amount: '', category: '餐饮', date: '', note: '' });
   assert(_isInvalid(bad), '缺少金额和日期应校验不通过');
-  assert(bad.errors && (bad.errors.amount || bad.errors.date), '应通过 errors 指出具体哪个字段有问题');
+  if (bad && bad.errors) {
+    assert(bad.errors.amount || bad.errors.date, '若返回 errors，应指出具体哪个字段有问题');
+  }
 });
 
-defTest('form', 'form：合法输入应通过并返回规范化 record', () => {
+defTest('form', 'form：合法输入应通过（record 结构按 S2 最终接口文档“有则检查”）', () => {
   assert(_FORM.validate, 'Ledger.Form.validate 未定义');
   const good = _FORM.validate({ type: 'expense', amount: '25.5', category: '餐饮', date: '2026-11-07', note: '午餐' });
   assert(_isValid(good), '合法输入应校验通过');
-  assert(good.record && typeof good.record.amount === 'number', '校验通过应返回 amount 为数字的 record');
+  if (good && good.record) {
+    assert(typeof good.record.amount === 'number', '若返回 record，其 amount 应为数字（S2 文档约定）');
+  }
 });
 
 
@@ -281,6 +317,23 @@ defTest('filter', 'filter：apply 不修改原始数组（规范强制）', () =
   const before = records.length;
   _FILTER.apply(records, _conds({ type: 'expense' }));
   assert(records.length === before, 'apply 不允许修改原始记录数组');
+});
+
+defTest('filter', 'filter：按类别筛选', () => {
+  assert(_FILTER.apply, 'Ledger.Filter.apply 未定义');
+  const records = [
+    makeRecord({ id: 'c1', category: '餐饮' }),
+    makeRecord({ id: 'c2', category: '交通' }),
+  ];
+  const out = _FILTER.apply(records, _conds({ category: '交通' }));
+  assert(out.length === 1 && out[0].id === 'c2', '类别筛选应只命中该类别记录');
+});
+
+defTest('filter', 'filter：reset() / getConditions() 可用（V1.0 第8节）', () => {
+  assert(_FILTER.reset && _FILTER.getConditions, 'Ledger.Filter.reset/getConditions 未定义');
+  _FILTER.reset();
+  const c = _FILTER.getConditions();
+  assert(c && typeof c === 'object', 'getConditions 应返回条件对象');
 });
 
 
