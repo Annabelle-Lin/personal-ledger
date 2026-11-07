@@ -17,7 +17,6 @@
 
   // ---------- 统一常量（来自 constants.js；未加载时用规范默认值兜底，便于独立调试）----------
   var CONST = (typeof LedgerConstants !== 'undefined') ? LedgerConstants : {};
-  var STORAGE_KEY = CONST.STORAGE_KEY || 'ledger_records';
   var RECORD_TYPES = CONST.RECORD_TYPES || { INCOME: 'income', EXPENSE: 'expense' };
   var INCOME_CATEGORIES = CONST.INCOME_CATEGORIES || ['工资', '兼职', '奖学金', '生活费', '红包', '其他'];
   var EXPENSE_CATEGORIES = CONST.EXPENSE_CATEGORIES || ['餐饮', '交通', '购物', '娱乐', '学习', '医疗', '居住', '其他'];
@@ -67,7 +66,7 @@
     if (n > 999999999) {
       return { valid: false, msg: '金额超出合理范围' };
     }
-    return { valid: true, value: Math.round(n * 100) / 100 };
+    return { valid: true, value: n };
   }
 
   // 日期合法性：格式 YYYY-MM-DD，且是真实存在的日历日期。
@@ -77,6 +76,12 @@
     var y = +m[1], mo = +m[2], d = +m[3];
     var dt = new Date(y, mo - 1, d);
     return dt.getFullYear() === y && dt.getMonth() === mo - 1 && dt.getDate() === d;
+  }
+
+  // 分类合法性：必须属于对应收支类型的分类数组（避免支出选“工资”、收入选“餐饮”）。
+  function isValidCategory(type, category) {
+    var list = (type === RECORD_TYPES.INCOME) ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+    return list.indexOf(category) !== -1;
   }
 
   function validate(fields) {
@@ -98,10 +103,12 @@
       record.amount = amt.value;
     }
 
-    // category：必填
+    // category：必填 + 必须属于对应收支类型的分类
     var cat = String(fields.category == null ? '' : fields.category).trim();
     if (!cat) {
       errors.category = '请选择类别';
+    } else if (record.type && !isValidCategory(record.type, cat)) {
+      errors.category = '类别与收支类型不匹配';
     } else {
       record.category = cat;
     }
@@ -236,9 +243,14 @@
   }
 
   // ---------- 初始化 ----------
+  var boundForm = null;
+
   function init() {
     var form = $(IDS.form);
     if (!form) return false;
+
+    // 防止重复初始化：同一表单只绑定一次；render() 会生成新表单元素，则重新绑定
+    if (form === boundForm) return true;
 
     form.addEventListener('submit', onSubmit);
 
@@ -251,6 +263,7 @@
     renderCategories();
     clearErrors();
     showMessage('', '');
+    boundForm = form;
     return true;
   }
 
@@ -284,6 +297,8 @@
       '<button type="submit">保存记录</button>' +
     '</form>';
 
+  // 注意：render() 会用标准表单覆盖 container 的原有 HTML。
+  // 若 S1 已在 index.html 手写表单，请改调 Ledger.Form.init()，不要调用 render()。
   function render(container) {
     var el = typeof container === 'string' ? $(container) : container;
     if (!el) return false;
