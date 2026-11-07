@@ -45,6 +45,11 @@ const API = {
   // form.js（S2）：金额/必填校验（接口待 S2 确认）
   validateAmount: typeof validateAmount !== 'undefined' ? validateAmount : null,
   validateForm:   typeof validateForm   !== 'undefined' ? validateForm   : null,
+
+  // export.js（S8）：已确认全局函数 exportToJSON() / importFromJSON(file)
+  // 注意：这两个函数依赖页面按钮和下载行为，本面板只做“接口存在性”检查
+  exportToJSON:   typeof exportToJSON   !== 'undefined' ? exportToJSON   : null,
+  importFromJSON: typeof importFromJSON !== 'undefined' ? importFromJSON : null,
 };
 /* ---------------------------------------------------------------------- */
 
@@ -133,9 +138,15 @@ test('storage：updateRecord 能修改已有记录', () => {
 
 test('storage：seedIfEmpty 空数据时能填充演示数据', () => {
   assert(API.saveRecords && API.seedIfEmpty && API.getRecords, 'storage 函数未定义');
-  API.saveRecords([]);          // 先清空
-  API.seedIfEmpty();            // 应自动补演示数据
-  assert(API.getRecords().length > 0, '空数据执行 seedIfEmpty 后应有记录');
+  API.saveRecords([]);                        // 先清空
+  const seeded = API.seedIfEmpty([            // S7 实现：需传入演示数据数组
+    makeRecord({ id: 'seed_1', category: '演示', note: '演示数据' }),
+  ]);
+  assert(seeded > 0, '空库时 seedIfEmpty 应写入数据');
+  assert(API.getRecords().some(x => x.id === 'seed_1'), 'seedIfEmpty 写入的演示数据应可读回');
+  // 再次调用不应重复写入（只在空库时生效）
+  const again = API.seedIfEmpty([makeRecord({ id: 'seed_2' })]);
+  assert(again === 0, '非空库时 seedIfEmpty 不应再写入');
 });
 
 test('storage：刷新持久化（LocalStorage 真正存住了）', () => {
@@ -215,8 +226,14 @@ test('filter：按日期范围筛选', () => {
 });
 
 
-/* ======================== 四、回归测试（集成后跑） ======================== */
-// “回归测试”就是：别人改完代码、合并到主分支后，
+/* ======================== 三-2、导出导入测试（S8） ======================== */
+test('export（S8）：exportToJSON / importFromJSON 接口已暴露', () => {
+  assert(API.exportToJSON, 'export.js 未定义 exportToJSON（S8 接口）');
+  assert(API.importFromJSON, 'export.js 未定义 importFromJSON（S8 接口）');
+});
+
+
+/* ======================== 四、回归测试（集成后跑） ======================== */// “回归测试”就是：别人改完代码、合并到主分支后，
 // 把上面的功能测试再整体跑一遍，确认老功能没被改坏。
 // 这里直接复用上面的测试即可——你每次集成后打开 test-runner.html 跑一次，
 // 对比上一次的通过数量，如果变少了，就说明有人改坏了，去查 Bug 记录。
