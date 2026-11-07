@@ -1,393 +1,388 @@
 /**
- * charts.js
- * S6：统计图表模块
+ * charts.js —— 统计图表模块（S6）
  *
- * 对外接口（V1.0）：
- *   Ledger.Charts.init(container)
- *   Ledger.Charts.update(records)
- *   Ledger.Charts.destroy()
+ * 依据《个人记账本系统开发规范 V1.0》第 9 节：
+ *   - 命名空间：Ledger.Charts
+ *   - 必须接口：init(container) / update(records) / destroy()
+ *   - 图表数据全部来自 S4 Finance 的统计结果，本模块不重复实现财务计算；
+ *   - 本模块不读写 LocalStorage。
  *
- * 数据来源：
- *   S7 LedgerStorage.getRecords()
- * 统计来源：
- *   S4 Finance.calculateSummary()
- *   S4 Finance.calculateCategoryStats()
- *   S4 Finance.calculateDailyTrend()
+ * 三张图：
+ *   1. 收入 vs 支出（柱状图）
+ *   2. 支出分类占比（环形图）
+ *   3. 每日收支趋势（折线图）
  *
- * 本文件不直接读写 localStorage，也不自行实现财务统计逻辑。
+ * 数据驱动方式：S1 在数据或月份变化后调用 Ledger.Charts.update(records)，
+ * 传入已按月份筛选的记录，保证图表与顶部“本月概览”口径一致。
  */
 (function (root) {
   'use strict';
 
-  const Ledger = root.Ledger = root.Ledger || {};
+  var Ledger = root.Ledger = root.Ledger || {};
 
-  const COLORS = {
-    income: '#20B486',
-    expense: '#F07868',
-    palette: [
-      '#6C8AE4',
-      '#F4B860',
-      '#9B85D5',
-      '#54B6C2',
-      '#E58BA8',
-      '#8CBF8C',
-      '#A5A5A5',
-      '#D6A56D'
-    ]
+  var COLORS = {
+    income: '#10b981',
+    expense: '#e11d48',
+    incomeSoft: 'rgba(16, 185, 129, 0.12)',
+    expenseSoft: 'rgba(225, 29, 72, 0.10)',
+    palette: ['#2563eb', '#10b981', '#f59e0b', '#8b5cf6', '#0ea5e9', '#ec4899', '#14b8a6', '#94a3b8']
   };
 
-  const CANVAS_IDS = {
-    comparison: 'incomeExpenseChart',
-    category: 'expenseCategoryChart',
-    trend: 'dailyTrendChart'
-  };
+  var CARDS = [
+    { key: 'comparison', id: 'chart-comparison', title: '收入 vs 支出', note: '本月合计' },
+    { key: 'category', id: 'chart-category', title: '支出分类占比', note: '按类别' },
+    { key: 'trend', id: 'chart-trend', title: '每日收支趋势', note: '按日', wide: true }
+  ];
 
-  const chartInstances = {
-    comparison: null,
-    category: null,
-    trend: null
-  };
+  var instances = {};
+  var container = null;
 
-  let chartContainer = null;
-  let currentRecords = [];
-  let listeningForUpdates = false;
-
-  function getChartConstructor() {
+  function ChartCtor() {
     return root.Chart || null;
   }
 
-  function getCanvas(id) {
-    return chartContainer ? chartContainer.querySelector('#' + id) : null;
+  function money(value) {
+    return '¥' + Number(value || 0).toFixed(2);
   }
 
-  function createCanvas(container, id) {
-    let canvas = container.querySelector('#' + id);
+  function createCard(meta) {
+    var card = root.document.createElement('div');
+    card.className = 'chart-card' + (meta.wide ? ' chart-card--wide' : '');
+    card.setAttribute('data-chart', meta.key);
 
-    if (!canvas) {
-      canvas = root.document.createElement('canvas');
-      canvas.id = id;
-      container.appendChild(canvas);
+    var title = root.document.createElement('div');
+    title.className = 'chart-title';
+    title.innerHTML = '<span>' + meta.title + '</span>' +
+      '<span class="chart-legend-note">' + meta.note + '</span>';
+    card.appendChild(title);
+
+    var body = root.document.createElement('div');
+    body.className = 'chart-body';
+
+    var canvas = root.document.createElement('canvas');
+    canvas.id = meta.id;
+    canvas.setAttribute('role', 'img');
+    canvas.setAttribute('aria-label', meta.title + '图表');
+    body.appendChild(canvas);
+    card.appendChild(body);
+
+    container.appendChild(card);
+    return card;
+  }
+
+  function cardOf(key) {
+    return container ? container.querySelector('[data-chart="' + key + '"]') : null;
+  }
+
+  function canvasOf(key) {
+    var meta = null;
+    CARDS.forEach(function (item) { if (item.key === key) meta = item; });
+    if (!meta) return null;
+    var card = cardOf(key);
+    return card ? card.querySelector('#' + meta.id) : null;
+  }
+
+  function destroyOne(key) {
+    if (instances[key]) {
+      instances[key].destroy();
+      instances[key] = null;
     }
-
-    return canvas;
   }
 
-  function destroyChart(name) {
-    if (chartInstances[name]) {
-      chartInstances[name].destroy();
-      chartInstances[name] = null;
+  function destroyAll() {
+    CARDS.forEach(function (meta) { destroyOne(meta.key); });
+  }
+
+  function emptyCard(key, text) {
+    destroyOne(key);
+    var card = cardOf(key);
+    if (!card) return;
+
+    var body = card.querySelector('.chart-body');
+    if (!body) return;
+
+    var canvas = body.querySelector('canvas');
+    if (canvas) canvas.style.display = 'none';
+
+    var tip = body.querySelector('.charts-empty');
+    if (!tip) {
+      tip = root.document.createElement('div');
+      tip.className = 'charts-empty';
+      body.appendChild(tip);
     }
+    tip.innerHTML = '<span class="charts-empty-icon" aria-hidden="true">📊</span><span>' + text + '</span>';
+    tip.style.display = 'flex';
   }
 
-  function destroyCharts() {
-    destroyChart('comparison');
-    destroyChart('category');
-    destroyChart('trend');
+  function clearEmpty(key) {
+    var card = cardOf(key);
+    if (!card) return;
+    var tip = card.querySelector('.charts-empty');
+    if (tip) tip.style.display = 'none';
+    var canvas = card.querySelector('canvas');
+    if (canvas) canvas.style.display = 'block';
   }
 
-  function clearEmptyState() {
-    if (!chartContainer) return;
-
-    const empty = chartContainer.querySelector('.charts-empty');
-    if (empty) empty.remove();
-
-    const canvases = chartContainer.querySelectorAll('canvas');
-    for (let i = 0; i < canvases.length; i += 1) {
-      canvases[i].style.display = 'block';
-    }
-  }
-
-  function showEmptyState(message) {
-    destroyCharts();
-    if (!chartContainer) return;
-
-    const canvases = chartContainer.querySelectorAll('canvas');
-    for (let i = 0; i < canvases.length; i += 1) {
-      canvases[i].style.display = 'none';
-    }
-
-    let empty = chartContainer.querySelector('.charts-empty');
-    if (!empty) {
-      empty = root.document.createElement('div');
-      empty.className = 'charts-empty';
-      chartContainer.appendChild(empty);
-    }
-
-    empty.textContent = message;
-    empty.style.cssText = 'text-align:center;padding:48px 16px;color:#9CA3AF;font-size:14px;';
-  }
-
-  function getFinance() {
-    const Finance = root.Finance;
-    const methods = [
-      'calculateSummary',
-      'calculateCategoryStats',
-      'calculateDailyTrend'
-    ];
-
-    if (!Finance || methods.some(function (name) {
-      return typeof Finance[name] !== 'function';
-    })) {
-      return null;
-    }
-
-    return Finance;
-  }
-
-  function readRecords(records) {
-    if (Array.isArray(records)) return records;
-
-    if (root.LedgerStorage && typeof root.LedgerStorage.getRecords === 'function') {
-      const stored = root.LedgerStorage.getRecords();
-      return Array.isArray(stored) ? stored : [];
-    }
-
-    console.error('[charts] 未找到 S7 LedgerStorage.getRecords()');
-    return [];
-  }
-
-  function formatMoney(value) {
-    return new Intl.NumberFormat('zh-CN', {
-      style: 'currency',
-      currency: 'CNY',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    }).format(Number(value) || 0);
+  function baseOptions() {
+    return {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 450 },
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: {
+            usePointStyle: true,
+            pointStyle: 'circle',
+            boxWidth: 8,
+            padding: 14,
+            font: { size: 12 },
+            color: '#4a5568'
+          }
+        },
+        tooltip: {
+          backgroundColor: 'rgba(15, 23, 42, 0.92)',
+          padding: 10,
+          cornerRadius: 8,
+          titleFont: { size: 12 },
+          bodyFont: { size: 12 },
+          displayColors: false
+        }
+      },
+      scales: {
+        x: {
+          grid: { display: false },
+          ticks: { color: '#97a3b6', font: { size: 11 } }
+        },
+        y: {
+          beginAtZero: true,
+          border: { display: false },
+          grid: { color: '#eef2f8' },
+          ticks: {
+            color: '#97a3b6',
+            font: { size: 11 },
+            callback: function (value) { return '¥' + value; }
+          }
+        }
+      }
+    };
   }
 
   function renderComparison(summary) {
-    destroyChart('comparison');
-
-    const canvas = getCanvas(CANVAS_IDS.comparison);
+    destroyOne('comparison');
+    var canvas = canvasOf('comparison');
     if (!canvas) return;
 
-    chartInstances.comparison = new (getChartConstructor())(canvas, {
+    var options = baseOptions();
+    options.plugins.legend.display = false;
+    options.plugins.tooltip.callbacks = {
+      label: function (ctx) { return money(ctx.raw); }
+    };
+
+    // 注意：这里用 totalIncome / totalExpense（传入记录的合计），
+    // 不能用 monthlyIncome —— 那是“当前自然月”的口径，切到其他月份会变成 0。
+    instances.comparison = new (ChartCtor())(canvas, {
       type: 'bar',
       data: {
         labels: ['收入', '支出'],
         datasets: [{
-          label: '金额（元）',
           data: [summary.totalIncome, summary.totalExpense],
           backgroundColor: [COLORS.income, COLORS.expense],
           borderRadius: 8,
-          maxBarThickness: 90
+          maxBarThickness: 76
         }]
       },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              label: function (context) {
-                return formatMoney(context.raw);
-              }
-            }
-          }
-        },
-        scales: {
-          y: { beginAtZero: true }
-        }
-      }
+      options: options
     });
   }
 
   function renderCategory(stats) {
-    destroyChart('category');
-
-    const canvas = getCanvas(CANVAS_IDS.category);
+    destroyOne('category');
+    var canvas = canvasOf('category');
     if (!canvas) return;
 
-    chartInstances.category = new (getChartConstructor())(canvas, {
+    var options = baseOptions();
+    delete options.scales;
+
+    options.cutout = '62%';
+    options.plugins.tooltip.callbacks = {
+      label: function (ctx) {
+        var item = stats[ctx.dataIndex];
+        return item.category + '：' + money(item.amount) +
+          '（' + Number(item.percentage).toFixed(1) + '%）';
+      }
+    };
+
+    instances.category = new (ChartCtor())(canvas, {
       type: 'doughnut',
       data: {
         labels: stats.map(function (item) { return item.category; }),
         datasets: [{
           data: stats.map(function (item) { return item.amount; }),
-          backgroundColor: stats.map(function (_, index) {
-            return COLORS.palette[index % COLORS.palette.length];
+          backgroundColor: stats.map(function (_, i) {
+            return COLORS.palette[i % COLORS.palette.length];
           }),
-          borderWidth: 3,
+          borderWidth: 2,
           borderColor: '#ffffff',
-          hoverOffset: 10
+          hoverOffset: 6
         }]
       },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        cutout: '66%',
-        plugins: {
-          legend: {
-            position: 'bottom',
-            labels: { usePointStyle: true, padding: 16 }
-          },
-          tooltip: {
-            callbacks: {
-              label: function (context) {
-                const item = stats[context.dataIndex];
-                return item.category + '：' + formatMoney(item.amount) +
-                  '（' + item.percentage.toFixed(2) + '%）';
-              }
-            }
-          }
-        }
-      }
+      options: options
     });
   }
 
   function renderTrend(trend) {
-    destroyChart('trend');
-
-    const canvas = getCanvas(CANVAS_IDS.trend);
+    destroyOne('trend');
+    var canvas = canvasOf('trend');
     if (!canvas) return;
 
-    chartInstances.trend = new (getChartConstructor())(canvas, {
+    var options = baseOptions();
+    options.interaction = { mode: 'index', intersect: false };
+    options.plugins.tooltip.callbacks = {
+      label: function (ctx) { return ctx.dataset.label + '：' + money(ctx.raw); }
+    };
+
+    function dataset(label, key, color, soft) {
+      return {
+        label: label,
+        data: trend.map(function (item) { return item[key]; }),
+        borderColor: color,
+        backgroundColor: soft,
+        fill: true,
+        tension: 0.35,
+        borderWidth: 2,
+        pointRadius: 3,
+        pointHoverRadius: 6,
+        pointBackgroundColor: '#fff',
+        pointBorderColor: color,
+        pointBorderWidth: 2
+      };
+    }
+
+    instances.trend = new (ChartCtor())(canvas, {
       type: 'line',
       data: {
-        labels: trend.map(function (item) { return item.date; }),
+        labels: trend.map(function (item) {
+          var parts = String(item.date).split('-');
+          return parts.length === 3 ? (+parts[1]) + '/' + (+parts[2]) : item.date;
+        }),
         datasets: [
-          {
-            label: '收入',
-            data: trend.map(function (item) { return item.income; }),
-            borderColor: COLORS.income,
-            backgroundColor: 'rgba(32, 180, 134, 0.12)',
-            fill: true,
-            tension: 0.35,
-            borderWidth: 3,
-            pointRadius: 4,
-            pointHoverRadius: 7
-          },
-          {
-            label: '支出',
-            data: trend.map(function (item) { return item.expense; }),
-            borderColor: COLORS.expense,
-            backgroundColor: 'rgba(240, 120, 104, 0.12)',
-            fill: true,
-            tension: 0.35,
-            borderWidth: 3,
-            pointRadius: 4,
-            pointHoverRadius: 7
-          }
+          dataset('收入', 'income', COLORS.income, COLORS.incomeSoft),
+          dataset('支出', 'expense', COLORS.expense, COLORS.expenseSoft)
         ]
       },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { mode: 'index', intersect: false },
-        plugins: {
-          legend: { position: 'bottom', labels: { usePointStyle: true, padding: 16 } },
-          tooltip: {
-            callbacks: {
-              label: function (context) {
-                return context.dataset.label + '：' + formatMoney(context.raw);
-              }
-            }
-          }
-        },
-        scales: {
-          x: { grid: { display: false } },
-          y: { beginAtZero: true }
-        }
-      }
+      options: options
     });
   }
 
+  /* ------------------------------ 对外接口 ------------------------------ */
+
+  function init(target) {
+    var el = typeof target === 'string'
+      ? root.document.querySelector(target)
+      : target;
+
+    if (!el) {
+      console.error('[charts] 找不到图表容器 #charts-container');
+      return false;
+    }
+
+    destroy();
+
+    container = el;
+    container.classList.add('chart-grid');
+    container.innerHTML = '';
+
+    CARDS.forEach(createCard);
+
+    if (!ChartCtor()) {
+      CARDS.forEach(function (meta) {
+        emptyCard(meta.key, 'Chart.js 未加载，请检查 vendor/chart.umd.min.js');
+      });
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * 渲染 / 刷新图表
+   * @param {Array} [records] 记录数组；省略时读取 LedgerStorage
+   * @returns {Number} 参与统计的记录条数
+   */
   function update(records) {
-    if (!chartContainer) {
+    if (!container) {
       console.warn('[charts] 请先调用 Ledger.Charts.init(container)');
       return 0;
     }
 
-    if (!getChartConstructor()) {
-      showEmptyState('Chart.js 尚未加载，请检查 script 引入顺序。');
+    var list = records;
+    if (!Array.isArray(list)) {
+      list = (root.LedgerStorage && typeof root.LedgerStorage.getRecords === 'function')
+        ? root.LedgerStorage.getRecords() : [];
+    }
+
+    if (!ChartCtor()) return 0;
+
+    var Finance = root.Finance;
+    if (!Finance || typeof Finance.calculateSummary !== 'function') {
+      CARDS.forEach(function (meta) {
+        emptyCard(meta.key, 'Finance 模块未加载');
+      });
       return 0;
     }
 
-    const Finance = getFinance();
-    if (!Finance) {
-      showEmptyState('Finance 模块未加载，无法生成图表。');
+    if (!list.length) {
+      CARDS.forEach(function (meta) {
+        emptyCard(meta.key, '所选月份暂无记录');
+      });
       return 0;
     }
 
-    currentRecords = readRecords(records);
+    var summary = Finance.calculateSummary(list);
+    var categoryStats = Finance.calculateCategoryStats(list, { type: 'expense' });
+    var trend = Finance.calculateDailyTrend(list);
 
-    if (currentRecords.length === 0) {
-      showEmptyState('暂无收支记录');
-      return 0;
+    // 收入 vs 支出
+    if (summary.totalIncome === 0 && summary.totalExpense === 0) {
+      emptyCard('comparison', '所选月份暂无收支');
+    } else {
+      clearEmpty('comparison');
+      renderComparison(summary);
     }
 
-    clearEmptyState();
-
-    const summary = Finance.calculateSummary(currentRecords);
-    const categoryStats = Finance.calculateCategoryStats(currentRecords, {
-      type: 'expense'
-    });
-    const dailyTrend = Finance.calculateDailyTrend(currentRecords);
-
-    renderComparison(summary);
-    renderCategory(categoryStats);
-    renderTrend(dailyTrend);
-
-    return currentRecords.length;
-  }
-
-  function handleLedgerUpdated() {
-    update();
-  }
-
-  function bindStorageEvent() {
-    if (listeningForUpdates || !root.document || typeof root.document.addEventListener !== 'function') {
-      return;
-    }
-    root.document.addEventListener('ledger:updated', handleLedgerUpdated);
-    listeningForUpdates = true;
-  }
-
-  function unbindStorageEvent() {
-    if (!listeningForUpdates || !root.document || typeof root.document.removeEventListener !== 'function') {
-      return;
-    }
-    root.document.removeEventListener('ledger:updated', handleLedgerUpdated);
-    listeningForUpdates = false;
-  }
-
-  function init(container) {
-    if (typeof container === 'string') {
-      container = root.document.querySelector(container);
+    // 支出分类占比
+    if (!categoryStats.length) {
+      emptyCard('category', '所选月份没有支出记录');
+    } else {
+      clearEmpty('category');
+      renderCategory(categoryStats);
     }
 
-    if (!container || typeof container.querySelector !== 'function') {
-      console.error('[charts] 无效的图表容器');
-      return;
+    // 每日趋势
+    if (!trend.length) {
+      emptyCard('trend', '所选月份暂无趋势数据');
+    } else {
+      clearEmpty('trend');
+      renderTrend(trend);
     }
 
-    destroy();
-    chartContainer = container;
-
-    createCanvas(chartContainer, CANVAS_IDS.comparison);
-    createCanvas(chartContainer, CANVAS_IDS.category);
-    createCanvas(chartContainer, CANVAS_IDS.trend);
-
-    bindStorageEvent();
-    update();
+    return list.length;
   }
 
   function destroy() {
-    unbindStorageEvent();
-    destroyCharts();
-    chartContainer = null;
-    currentRecords = [];
+    destroyAll();
+    if (container) {
+      container.innerHTML = '';
+      container.classList.remove('chart-grid');
+    }
+    container = null;
   }
 
   Ledger.Charts = {
     init: init,
     update: update,
-    destroy: destroy
+    destroy: destroy,
+    COLORS: COLORS
   };
-
-  // 兼容 Node.js 测试；浏览器中仍使用 window.Ledger.Charts
-  if (typeof module !== 'undefined' && module.exports) {
-    module.exports = Ledger.Charts;
-  }
 })(typeof window !== 'undefined' ? window : globalThis);
