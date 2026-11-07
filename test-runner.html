@@ -7,35 +7,50 @@
     body { font-family: -apple-system, "Microsoft YaHei", sans-serif; margin: 24px; background: #f7f8fa; color: #222; }
     h1 { font-size: 20px; }
     .tip { background: #fff7e6; border: 1px solid #ffd591; padding: 12px 16px; border-radius: 8px; margin: 12px 0; line-height: 1.6; }
+    .actions button { margin-right: 8px; padding: 6px 14px; border: 1px solid #d9d9d9; border-radius: 6px; background: #fff; cursor: pointer; }
+    .actions button:hover { border-color: #40a9ff; color: #40a9ff; }
     #results { margin-top: 16px; }
     .row { display: flex; gap: 12px; align-items: baseline; padding: 10px 14px; margin: 6px 0; border-radius: 6px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
     .row.ok { border-left: 4px solid #52c41a; }
     .row.bad { border-left: 4px solid #ff4d4f; }
     .tag { font-weight: 700; white-space: nowrap; }
-    .name { font-weight: 600; min-width: 280px; }
+    .name { font-weight: 600; min-width: 320px; }
     .msg { color: #666; }
   </style>
 </head>
 <body>
-  <h1>🧪 S9 测试面板（测试负责人专用）</h1>
+  <h1>🧪 S9 测试面板（依据《开发规范 V1.0》）</h1>
   <div class="tip">
     <b>怎么用（零基础也能跑）：</b><br/>
-    1. 把这个文件放到你们项目的 <code>tests/</code> 文件夹里（和下面的脚本路径匹配）。<br/>
-    2. 确认 <code>../js/</code> 里有 storage.js / finance.js / form.js / filter.js（名字按你们实际改）。<br/>
-    3. 用浏览器（Chrome/Edge）直接打开本文件，页面会自动跑测试并显示结果。<br/>
-    4. 绿色=通过，红色=失败。失败的把信息抄到《测试清单与Bug记录》里交给对应同学。<br/>
-    5. 每次别人合并代码后，再打开一次，对比通过数量——这就是“回归测试”。
+    1. 把这个文件放在项目 <code>tests/</code> 目录（与 tests.js 同级）。<br/>
+    2. 用浏览器直接打开本文件，会自动执行 <code>Ledger.Tests.runAll()</code> 并显示结果。<br/>
+    3. 绿色=通过，红色=失败；失败的把名称和说明抄到《测试清单与Bug记录》并 @ 对应同学。<br/>
+    4. 别人合并代码后，点下方按钮或刷新页面重跑——对比通过数量就是回归测试。<br/>
+    5. 模块还没合并时，对应用例会显示“未定义”，属正常现象，不代表测试失败。
+  </div>
+  <div class="actions">
+    <button onclick="Ledger.Tests.runAll()">▶ 全部测试</button>
+    <button onclick="Ledger.Tests.testStorage()">storage</button>
+    <button onclick="Ledger.Tests.testFinance()">finance</button>
+    <button onclick="Ledger.Tests.testForm()">form</button>
+    <button onclick="Ledger.Tests.testFilter()">filter</button>
+    <button onclick="Ledger.Tests.testImportExport()">import/export</button>
   </div>
 
-  <!-- 先把项目里其他同学的模块加载进来，tests.js 才能测它们 -->
+  <!-- 按规范 V1.0 第 14 节的加载顺序引入模块（charts.js 依赖 Chart.js、app.js 会初始化页面，
+       测试面板不加载它们；测试只针对纯逻辑接口） -->
+  <script src="../js/constants.js"></script>
   <script src="../js/storage.js"></script>
-  <script src="../js/finance.js"></script>
   <script src="../js/form.js"></script>
+  <script src="../js/records.js"></script>
+  <script src="../js/finance.js"></script>
   <script src="../js/filter.js"></script>
+  <script src="../js/export.js"></script>
+  <script src="../js/demo-data.js"></script>
 
-  <!-- 最后加载测试脚本 -->
+  <!-- 测试脚本（提供 Ledger.Tests 命名空间） -->
   <script src="tests.js"></script>
 
-  <div id="results"><p>正在运行测试……</p></div>
+  <div id="results"><p>正在运行测试……（若长时间无结果，检查上方 ../js/ 下的模块文件是否存在）</p></div>
 </body>
 </html>
