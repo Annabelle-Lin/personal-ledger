@@ -14,21 +14,35 @@
  *    不用动下面的测试逻辑。
  * ========================================================================= */
 
-/* -------------------- 项目函数名配置（只改这里！） -------------------- */
-// ✅ S7 storage 已确认（2026-11-07 S7 提供）：
-//    全局对象 LedgerStorage，方法：getRecords / addRecord / updateRecord /
-//    deleteRecord / saveRecords / seedIfEmpty，存储键 ledger_records
-// ⏳ S2 form / S4 finance / S5 filter 接口待确认，下方仍为占位，确认后补上即可
+/* -------------------- 项目接口配置（只改这里！） -------------------- */
+// ✅ S7 storage 已确认并经 S9 实测：全局 LedgerStorage（组长问题1也倾向此命名）
+// ✅ S4 finance 候选版：全局 Finance.*（待组长《开发规范.md》终审）
+// ✅ S2 form 候选版：Ledger.Form.*（待终审；问题1/2待解决，命名可能调整）
+// ✅ S8 export 候选版：全局 exportToJSON() / importFromJSON(file)
+// ⏳ S5 filter 接口未提供，暂用 filterRecords(records, criteria) 占位
+// 命名空间探测做了兼容：终审后即使挂到 Ledger.* 下也能自动找到。
 function _bindAll(ns, names) {
   const out = {};
   if (ns) names.forEach(n => { if (typeof ns[n] === 'function') out[n] = ns[n].bind(ns); });
   return out;
 }
-const _storage = (typeof LedgerStorage !== 'undefined') ? LedgerStorage : null;
-const _STORAGE_API = _bindAll(_storage, ['getRecords', 'addRecord', 'updateRecord', 'deleteRecord', 'saveRecords', 'seedIfEmpty']);
+const _G = (typeof window !== 'undefined') ? window : globalThis;
+const _Ledger = _G.Ledger || null;
+
+const _storageNS  = _G.LedgerStorage || (_Ledger && _Ledger.Storage) || null;
+const _financeNS  = _G.Finance || (_Ledger && _Ledger.Finance) || null;
+const _formNS     = (_Ledger && _Ledger.Form) || _G.LedgerForm || null;
+
+const _STORAGE_API = _bindAll(_storageNS, ['getRecords', 'addRecord', 'updateRecord', 'deleteRecord', 'saveRecords', 'seedIfEmpty', 'clearAll']);
+const _FINANCE_API = _bindAll(_financeNS, ['calculateTotalIncome', 'calculateTotalExpense', 'calculateBalance', 'calculateSummary', 'calculateMonthlyIncome', 'calculateMonthlyExpense', 'calculateMonthlyBalance', 'calculateCategoryStats', 'calculateDailyTrend', 'currentMonth']);
+const _FORM_API    = _bindAll(_formNS, ['validate', 'validateAmount', 'buildRecord', 'render', 'init']);
 
 const API = {
-  // storage.js（S7）：已按真实接口对接
+  storage: _STORAGE_API,
+  finance: _FINANCE_API,
+  form:    _FORM_API,
+
+  // 便捷别名（测试里少打点字）
   getRecords:   _STORAGE_API.getRecords   || null,
   saveRecords:  _STORAGE_API.saveRecords  || null,
   addRecord:    _STORAGE_API.addRecord    || null,
@@ -36,21 +50,21 @@ const API = {
   deleteRecord: _STORAGE_API.deleteRecord || null,
   seedIfEmpty:  _STORAGE_API.seedIfEmpty  || null,
 
-  // finance.js（S4）：计算总收入/总支出/余额（接口待 S4 确认）
-  calculateTotals: typeof calculateTotals !== 'undefined' ? calculateTotals : null,
+  // filter.js（S5）：接口未提供，占位待补
+  filterRecords: (typeof _G.filterRecords === 'function') ? _G.filterRecords : ((_Ledger && typeof _Ledger.Filter === 'object' && typeof _Ledger.Filter.filter === 'function') ? _Ledger.Filter.filter.bind(_Ledger.Filter) : null),
 
-  // filter.js（S5）：按条件筛选记录（接口待 S5 确认）
-  filterRecords: typeof filterRecords !== 'undefined' ? filterRecords : null,
-
-  // form.js（S2）：金额/必填校验（接口待 S2 确认）
-  validateAmount: typeof validateAmount !== 'undefined' ? validateAmount : null,
-  validateForm:   typeof validateForm   !== 'undefined' ? validateForm   : null,
-
-  // export.js（S8）：已确认全局函数 exportToJSON() / importFromJSON(file)
-  // 注意：这两个函数依赖页面按钮和下载行为，本面板只做“接口存在性”检查
-  exportToJSON:   typeof exportToJSON   !== 'undefined' ? exportToJSON   : null,
-  importFromJSON: typeof importFromJSON !== 'undefined' ? importFromJSON : null,
+  // export.js（S8）：依赖页面按钮与下载行为，本面板只做“接口存在性”检查
+  exportToJSON:   (typeof _G.exportToJSON   === 'function') ? _G.exportToJSON   : null,
+  importFromJSON: (typeof _G.importFromJSON === 'function') ? _G.importFromJSON : null,
 };
+
+// 兼容两种校验返回格式：boolean 或 {valid:boolean}
+function _isInvalid(res) {
+  return res === false || (res && typeof res === 'object' && res.valid === false);
+}
+function _isValid(res) {
+  return res === true || (res && typeof res === 'object' && res.valid === true);
+}
 /* ---------------------------------------------------------------------- */
 
 
@@ -158,49 +172,50 @@ test('storage：刷新持久化（LocalStorage 真正存住了）', () => {
   assert(reloaded.some(x => x.id === 'persist_1'), '重新读取后数据应还在（刷新不丢）');
 });
 
-test('finance：calculateTotals 计算收入/支出/余额正确', () => {
-  assert(API.calculateTotals, 'finance.js 未定义 calculateTotals，请改 API 配置');
+test('finance（S4）：总收入/总支出/余额计算正确', () => {
+  const F = API.finance;
+  assert(F && (F.calculateSummary || (F.calculateTotalIncome && F.calculateTotalExpense && F.calculateBalance)),
+    'Finance 未定义（S4 模块未加载或未按接口暴露）');
   const records = [
     makeRecord({ type: 'income',  amount: 100 }),
     makeRecord({ type: 'expense', amount: 30 }),
     makeRecord({ type: 'expense', amount: 20 }),
   ];
-  const t = API.calculateTotals(records);
-  assert(Math.abs(t.income - 100) < 1e-9, '总收入应为 100，实际 ' + t.income);
-  assert(Math.abs(t.expense - 50) < 1e-9, '总支出应为 50，实际 ' + t.expense);
-  assert(Math.abs(t.balance - 50) < 1e-9, '余额应为 50，实际 ' + t.balance);
+  if (F.calculateSummary) {
+    const s = F.calculateSummary(records);
+    assert(Math.abs(s.totalIncome - 100) < 1e-9, '总收入应为 100，实际 ' + s.totalIncome);
+    assert(Math.abs(s.totalExpense - 50) < 1e-9, '总支出应为 50，实际 ' + s.totalExpense);
+    assert(Math.abs(s.totalBalance - 50) < 1e-9, '总余额应为 50，实际 ' + s.totalBalance);
+  } else {
+    assert(Math.abs(F.calculateTotalIncome(records) - 100) < 1e-9, '总收入应为 100');
+    assert(Math.abs(F.calculateTotalExpense(records) - 50) < 1e-9, '总支出应为 50');
+    assert(Math.abs(F.calculateBalance(records) - 50) < 1e-9, '余额应为 50');
+  }
 });
 
 
 /* ======================== 二、异常输入测试 ======================== */
-test('form：金额为负数应被拒绝', () => {
-  if (API.validateAmount) {
-    assert(API.validateAmount(-5) === false, '负数金额应判定为非法');
-  } else if (API.validateForm) {
-    const res = API.validateForm(makeRecord({ amount: -5 }));
-    assert(res === false, '负数金额表单应校验不通过');
-  } else {
-    throw new Error('form.js 未定义 validateAmount/validateForm，无法测金额校验');
-  }
+// S2 的接口（候选版）：Ledger.Form.validateAmount(value) → {valid, value|msg}
+//                     Ledger.Form.validate(fields)      → {valid, errors, record}
+test('form（S2）：金额为负数应被拒绝', () => {
+  const FM = API.form;
+  assert(FM && FM.validateAmount, 'Ledger.Form.validateAmount 未定义（S2 模块未加载）');
+  assert(_isInvalid(FM.validateAmount(-5)), '负数金额应判定为非法');
 });
 
-test('form：金额含字母/为空应被拒绝', () => {
-  if (API.validateAmount) {
-    assert(API.validateAmount('abc') === false, '字母金额应非法');
-    assert(API.validateAmount('') === false || API.validateAmount(null) === false, '空金额应非法');
-  } else if (API.validateForm) {
-    assert(API.validateForm(makeRecord({ amount: 'abc' })) === false, '字母金额应不通过');
-  } else {
-    throw new Error('form.js 未定义校验函数，无法测异常输入');
-  }
+test('form（S2）：金额含字母/为空应被拒绝', () => {
+  const FM = API.form;
+  assert(FM && FM.validateAmount, 'Ledger.Form.validateAmount 未定义');
+  assert(_isInvalid(FM.validateAmount('abc')), '字母金额应非法');
+  assert(_isInvalid(FM.validateAmount('')), '空金额应非法');
 });
 
-test('form：必填项（类型/金额/日期）缺失应被拒绝', () => {
-  assert(API.validateForm, 'form.js 未定义 validateForm');
-  const bad = makeRecord({});
-  delete bad.amount;       // 缺金额
-  delete bad.date;         // 缺日期
-  assert(API.validateForm(bad) === false, '缺少必填项应校验不通过');
+test('form（S2）：必填项缺失应被拒绝并给出错误提示', () => {
+  const FM = API.form;
+  assert(FM && FM.validate, 'Ledger.Form.validate 未定义');
+  const bad = FM.validate({ type: 'expense', amount: '', category: '餐饮', date: '', note: '' });
+  assert(_isInvalid(bad), '缺少金额和日期应校验不通过');
+  assert(bad.errors && (bad.errors.amount || bad.errors.date), '应通过 errors 指出具体哪个字段有问题');
 });
 
 
@@ -233,7 +248,8 @@ test('export（S8）：exportToJSON / importFromJSON 接口已暴露', () => {
 });
 
 
-/* ======================== 四、回归测试（集成后跑） ======================== */// “回归测试”就是：别人改完代码、合并到主分支后，
+/* ======================== 四、回归测试（集成后跑） ======================== */
+// “回归测试”就是：别人改完代码、合并到主分支后，
 // 把上面的功能测试再整体跑一遍，确认老功能没被改坏。
 // 这里直接复用上面的测试即可——你每次集成后打开 test-runner.html 跑一次，
 // 对比上一次的通过数量，如果变少了，就说明有人改坏了，去查 Bug 记录。
