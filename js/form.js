@@ -1,73 +1,32 @@
 /**
  * form.js —— 记账表单模块（S2：记账表单）
  *
- * 职责：
- *   1. 收入 / 支出新增表单
- *   2. 必填校验（类型、金额、类别、日期）
- *   3. 金额合法性校验（正数、最多两位小数、无货币符号/负号/科学计数法）
- *   4. 新增记录（写入 LocalStorage）
+ * 依据《个人记账本系统开发规范 V1.0》：
+ *   - 命名空间：Ledger.Form
+ *   - 必须提供：render(container) / init() / validate(fields) /
+ *               validateAmount(value) / buildRecord(fields)
+ *   - 新增记录时调用 LedgerStorage.addRecord(record)（S7 统一存储入口），
+ *     本模块禁止直接操作 localStorage。
+ *   - 分类 / 存储键 / 记录类型统一取自 constants.js 的 LedgerConstants。
  *
- * 与其它模块的约定（见分工方案第三节）：
- *   - 统一数据结构：{ id, type, amount, category, date, note }
- *       type:   "income" | "expense"
- *       amount: 数字（如 25.00），不能存成带货币符号的字符串
- *       date:   "YYYY-MM-DD"
- *   - 统一存储键：ledger_records
- *   - 存储接口：优先调用 storage.js 暴露的 Ledger.Storage
- *       getRecords() / saveRecords(records) / addRecord(record) / deleteRecord(id)
- *     storage.js（S7）尚未集成时，本文件用同键的内置兼容实现，保证 S2 能独立联调。
- *   - 新增成功后，向 document 派发 "ledger:updated" 自定义事件，
- *     供账单列表(records.js)、财务统计(finance.js)、图表(charts.js)刷新。
- *
- * 对外接口（全局命名空间 Ledger.Form）：
- *   - Ledger.Form.render(container)   // 将标准表单注入到指定容器并绑定事件
- *   - Ledger.Form.init()              // 若 index.html 已手写表单，仅绑定事件
- *   - Ledger.Form.validate(fields)    // 校验，返回 { valid, errors, record }
- *   - Ledger.Form.buildRecord(fields) // 校验并组装记录（含 id），失败返回 null
+ * 新增流程：读取表单 → 校验金额/类型/分类/日期 → 构建 Record →
+ *           LedgerStorage.addRecord(record) → 触发 ledger:updated 事件。
  */
 (function (global) {
   'use strict';
 
-  // ---------- 存储键 ----------
-  var STORAGE_KEY = 'ledger_records';
+  // ---------- 统一常量（来自 constants.js；未加载时用规范默认值兜底，便于独立调试）----------
+  var CONST = (typeof LedgerConstants !== 'undefined') ? LedgerConstants : {};
+  var STORAGE_KEY = CONST.STORAGE_KEY || 'ledger_records';
+  var RECORD_TYPES = CONST.RECORD_TYPES || { INCOME: 'income', EXPENSE: 'expense' };
+  var INCOME_CATEGORIES = CONST.INCOME_CATEGORIES || ['工资', '兼职', '奖学金', '生活费', '红包', '其他'];
+  var EXPENSE_CATEGORIES = CONST.EXPENSE_CATEGORIES || ['餐饮', '交通', '购物', '娱乐', '学习', '医疗', '居住', '其他'];
 
-  // ---------- 内置兼容存储（仅当 storage.js 未提供 Ledger.Storage 时使用）----------
-  // 与 storage.js 使用同一个 localStorage 键，后续可无缝替换，不会产生两套数据。
-  var fallbackStorage = {
-    getRecords: function () {
-      try {
-        var raw = global.localStorage.getItem(STORAGE_KEY);
-        var data = raw ? JSON.parse(raw) : [];
-        return Array.isArray(data) ? data : [];
-      } catch (e) {
-        return [];
-      }
-    },
-    saveRecords: function (records) {
-      global.localStorage.setItem(STORAGE_KEY, JSON.stringify(records || []));
-    },
-    addRecord: function (record) {
-      var records = this.getRecords();
-      records.push(record);
-      this.saveRecords(records);
-      return record;
-    },
-    deleteRecord: function (id) {
-      var records = this.getRecords().filter(function (r) { return r.id !== id; });
-      this.saveRecords(records);
-    }
-  };
+  var TYPE_LABEL = {};
+  TYPE_LABEL[RECORD_TYPES.EXPENSE] = '支出';
+  TYPE_LABEL[RECORD_TYPES.INCOME] = '收入';
 
-  // 每次调用时再解析，这样即使 storage.js 在 form.js 之后加载也能正确接管。
-  function storage() {
-    if (global.Ledger && global.Ledger.Storage) {
-      return global.Ledger.Storage;
-    }
-    return fallbackStorage;
-  }
-
-  // ---------- 表单字段约定 ----------
-  // 若 S1 在 index.html 里手写表单，请按下列 id 命名；也可直接调用 render() 注入标准表单。
+  // ---------- 表单元素 ID（S1 的 index.html 按此对象提供元素）----------
   var IDS = {
     form: 'ledger-form',
     type: 'ledger-type',
@@ -77,13 +36,6 @@
     note: 'ledger-note',
     message: 'ledger-form-message'
   };
-
-  var CATEGORIES = {
-    expense: ['餐饮', '交通', '购物', '居住', '娱乐', '医疗', '教育', '其他'],
-    income: ['工资', '奖金', '理财', '兼职', '其他']
-  };
-
-  var TYPE_LABEL = { expense: '支出', income: '收入' };
 
   // ---------- 工具函数 ----------
   function $(id) {
@@ -131,8 +83,8 @@
     var errors = {};
     var record = {};
 
-    // type：必填，且只能是 income 或 expense
-    if (fields.type !== 'income' && fields.type !== 'expense') {
+    // type：必填，且只能是 income / expense
+    if (fields.type !== RECORD_TYPES.INCOME && fields.type !== RECORD_TYPES.EXPENSE) {
       errors.type = '请选择收入或支出';
     } else {
       record.type = fields.type;
@@ -211,8 +163,8 @@
     var typeEl = $(IDS.type);
     var catEl = $(IDS.category);
     if (!typeEl || !catEl) return;
-    var type = typeEl.value || 'expense';
-    var list = CATEGORIES[type] || CATEGORIES.expense;
+    var type = typeEl.value || RECORD_TYPES.EXPENSE;
+    var list = (type === RECORD_TYPES.INCOME) ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
     catEl.innerHTML = '';
     list.forEach(function (c) {
       var opt = document.createElement('option');
@@ -251,12 +203,17 @@
 
     result.record.id = generateId();
     try {
-      storage().addRecord(result.record);
+      // 统一存储入口：S7 的 LedgerStorage，禁止本模块直接写 localStorage
+      if (typeof LedgerStorage === 'undefined' || typeof LedgerStorage.addRecord !== 'function') {
+        throw new Error('LedgerStorage 未加载，请确认 storage.js 已按顺序引入');
+      }
+      LedgerStorage.addRecord(result.record);
+
       showMessage('success', TYPE_LABEL[result.record.type] + '记录已保存：' +
         result.record.amount.toFixed(2) + ' 元（' + result.record.category + '）');
       resetForm();
 
-      // 通知其它模块刷新
+      // 通知其它模块刷新（S3/S4/S5/S6 监听）
       var evt;
       try {
         evt = new CustomEvent('ledger:updated', { detail: { record: result.record } });
@@ -298,14 +255,13 @@
   }
 
   // ---------- 标准表单模板（若 S1 未手写 HTML）----------
-  // 金额用 type="text" + inputmode="decimal"，便于校验时给出精确的金额错误提示。
   var DEFAULT_HTML =
     '<form id="' + IDS.form + '" novalidate>' +
       '<div class="form-row">' +
         '<label for="' + IDS.type + '">类型</label>' +
         '<select id="' + IDS.type + '">' +
-          '<option value="expense">支出</option>' +
-          '<option value="income">收入</option>' +
+          '<option value="' + RECORD_TYPES.EXPENSE + '">支出</option>' +
+          '<option value="' + RECORD_TYPES.INCOME + '">收入</option>' +
         '</select>' +
       '</div>' +
       '<div class="form-row">' +
@@ -338,8 +294,6 @@
   // ---------- 导出 ----------
   global.Ledger = global.Ledger || {};
   global.Ledger.Form = {
-    STORAGE_KEY: STORAGE_KEY,
-    CATEGORIES: CATEGORIES,
     IDS: IDS,
     render: render,
     init: init,
