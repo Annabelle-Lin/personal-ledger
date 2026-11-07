@@ -55,11 +55,15 @@
 
 | 模块 | 负责人 | 接口状态 | S9 验证情况 |
 |---|---|---|---|
-| storage.js | S7 | ✅ 已确认：LedgerStorage.getRecords/saveRecords/addRecord/updateRecord/deleteRecord/seedIfEmpty/clearAll，键 ledger_records | ✅ S7 自测 16/16 通过；S9 Node 实测 5/5 通过 |
-| export.js | S8 | ✅ 已确认：全局函数 exportToJSON() / importFromJSON(file)，依赖 S1 的按钮元素 | ⏳ 代码未合并，面板先做接口存在性检查 |
-| finance.js | S4 | ⏳ 待 S4 提供函数名 | 待测 |
+| storage.js | S7 | ✅ 已确认：LedgerStorage.*，键 ledger_records（组长问题1倾向保留此命名） | ✅ S7 自测 16/16 通过；S9 Node 实测 5/5 通过 |
+| export.js | S8 | ✅ 候选版已收到：exportToJSON()/importFromJSON(file)，依赖 S1 的三个元素（组长问题3待确认） | ⏳ 代码未合并，面板先做接口存在性检查 |
+| finance.js | S4 | ✅ 候选版已收到：Finance.calculateSummary 等，已接入测试配置；**待组长《开发规范.md》终审** | ⏳ 待 S4 代码合并后激活 |
+| form.js | S2 | ✅ 候选版已收到：Ledger.Form.validate/validateAmount（返回 {valid,errors,record}），已接入测试配置；**待终审**（组长问题1/2：命名统一、去掉兜底存储） | ⏳ 待 S2 代码合并后激活 |
 | filter.js | S5 | ⏳ 待 S5 提供函数名 | 待测 |
-| form.js | S2 | ⏳ 待 S2 提供函数名 | 待测 |
+
+> 注：组长 15:2X 提出 4 个接口问题（S2/S7 命名不一致、S2 兜底存储、S8 页面元素、脚本加载方式），
+> 正在统一审核接口。S9 已将 S2/S4 候选接口预接入测试配置（命名空间探测做了兼容），
+> 《开发规范.md》终审发布后预计 5 分钟内完成校准。
 
 ---
 
