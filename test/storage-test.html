@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>storage.js 自测 · S7 数据存储</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 24px 64px;
+    background: #FAFAF8; color: #2C2C2A;
+    font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+    font-size: 14px; line-height: 1.6;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
+  .meta { color: #888780; font-size: 13px; margin: 0 0 20px; }
+  .summary {
+    padding: 16px 20px; border-radius: 10px; margin-bottom: 20px;
+    background: #F1EFE8; border: 1px solid #E5E3DC;
+    font-size: 15px; font-weight: 600; color: #444441;
+  }
+  .summary.pass { background: #E1F5EE; border-color: #9FE1CB; color: #0F6E56; }
+  .summary.fail { background: #FCEBEB; border-color: #F7C1C1; color: #A32D2D; }
+  table { width: 100%; border-collapse: collapse; background: #fff;
+          border: 1px solid #E5E3DC; border-radius: 10px; overflow: hidden; }
+  thead th {
+    background: #F7F6F2; text-align: left; font-weight: 600; font-size: 13px;
+    color: #5F5E5A; padding: 10px 14px; border-bottom: 1px solid #E5E3DC; white-space: nowrap;
+  }
+  tbody td { padding: 9px 14px; border-bottom: 1px solid #F1EFE8; vertical-align: top; font-size: 13px; }
+  tbody tr:last-child td { border-bottom: none; }
+  td.idx { color: #888780; width: 42px; }
+  td.res { width: 74px; font-weight: 600; white-space: nowrap; }
+  .ok { color: #0F6E56; }
+  .no { color: #A32D2D; }
+  code { background: #F1EFE8; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  .tip { color: #888780; font-size: 12px; margin: 14px 0 18px; }
+  button {
+    padding: 8px 18px; border-radius: 8px; border: 1px solid #D3D1C7;
+    background: #fff; color: #2C2C2A; font-size: 13px; cursor: pointer;
+    font-family: inherit;
+  }
+  button:hover { background: #F7F6F2; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>storage.js 自测报告</h1>
+  <p class="meta">S7 数据存储模块 · LocalStorage 读写 · 提交人：姜思源 102402110</p>
+
+  <div id="summary" class="summary">正在运行…</div>
+
+  <table>
+    <thead>
+      <tr><th>#</th><th>测试用例</th><th>结果</th><th>说明</th></tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+
+  <p class="tip">
+    本页使用独立存储键 <code>ledger_records_test</code>，不会影响正式数据 <code>ledger_records</code>。
+    请通过 <code>file://</code> 或本地服务器打开本页（浏览器直接双击即可）。
+  </p>
+  <button onclick="runAll()">重新运行</button>
+</div>
+
+<script>window.LEDGER_STORAGE_KEY = 'ledger_records_test';</script>
+<script src="../js/storage.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var S = window.LedgerStorage;
+  var tbody = document.getElementById('tbody');
+  var summary = document.getElementById('summary');
+
+  function eq(actual, expected, label) {
+    if (actual !== expected) {
+      throw new Error(label + '：期望 ' + JSON.stringify(expected) + '，实际 ' + JSON.stringify(actual));
+    }
+  }
+  function ok(cond, msg) { if (!cond) throw new Error(msg); }
+  function expectThrow(fn, msg) {
+    try { fn(); } catch (e) { return e; }
+    throw new Error(msg);
+  }
+  var base = { type: 'expense', amount: 25.5, category: '餐饮', date: '2026-11-07', note: '午饭' };
+
+  var cases = [
+    ['空库初始化返回空数组', function () {
+      S.clearAll();
+      eq(S.getRecords().length, 0, 'getRecords 长度');
+    }],
+
+    ['新增记录返回 id 与时间戳', function () {
+      S.clearAll();
+      var r = S.addRecord(base);
+      ok(typeof r.id === 'string' && r.id.indexOf('record_') === 0, 'id 前缀应为 record_');
+      ok(r.createdAt > 0, 'createdAt 应大于 0');
+      eq(r.type, 'expense', 'type');
+      eq(r.amount, 25.5, 'amount');
+    }],
+
+    ['新增后可以读回 1 条', function () {
+      S.clearAll();
+      S.addRecord(base);
+      eq(S.getRecords().length, 1, '记录条数');
+      eq(S.getRecords()[0].category, '餐饮', 'category');
+    }],
+
+    ['金额字符串自动清洗并保留两位小数', function () {
+      S.clearAll();
+      var r = S.addRecord({ type: 'income', amount: '¥3,200.556', category: '工资', date: '2026-11-05' });
+      eq(r.amount, 3200.56, '金额应四舍五入到两位');
+    }],
+
+    ['金额为负数时报错', function () {
+      var e = expectThrow(function () {
+        S.addRecord({ type: 'expense', amount: -10, category: '餐饮', date: '2026-11-07' });
+      }, '负数金额应抛错');
+      ok(e.message.indexOf('大于 0') >= 0, '错误信息应提示大于 0');
+    }],
+
+    ['金额非数字时报错', function () {
+      expectThrow(function () {
+        S.addRecord({ type: 'expense', amount: 'abc', category: '餐饮', date: '2026-11-07' });
+      }, '非数字金额应抛错');
+    }],
+
+    ['收支类型非法时报错', function () {
+      expectThrow(function () {
+        S.addRecord({ type: 'transfer', amount: 10, category: '转账', date: '2026-11-07' });
+      }, '非法 type 应抛错');
+    }],
+
+    ['不存在的日期（2026-02-30）被拒绝', function () {
+      expectThrow(function () {
+        S.addRecord({ type: 'expense', amount: 10, category: '餐饮', date: '2026-02-30' });
+      }, '2026-02-30 不是真实日期，应抛错');
+    }],
+
+    ['列表按日期倒序排列', function () {
+      S.clearAll();
+      S.addRecord({ type: 'expense', amount: 10, category: '餐饮', date: '2026-11-01' });
+      S.addRecord({ type: 'expense', amount: 20, category: '交通', date: '2026-11-07' });
+      S.addRecord({ type: 'income', amount: 30, category: '工资', date: '2026-11-05' });
+      var list = S.getRecords();
+      eq(list[0].date, '2026-11-07', '第一条日期');
+      eq(list[1].date, '2026-11-05', '第二条日期');
+      eq(list[2].date, '2026-11-01', '第三条日期');
+    }],
+
+    ['更新记录金额生效', function () {
+      S.clearAll();
+      var r = S.addRecord(base);
+      var u = S.updateRecord(r.id, { amount: 88.8, note: '改成晚饭' });
+      eq(u.amount, 88.8, '更新后金额');
+      eq(S.getRecords()[0].note, '改成晚饭', '更新后备注');
+    }],
+
+    ['更新不存在的 id 返回 null', function () {
+      eq(S.updateRecord('record_not_exist', { amount: 1 }), null, '返回值');
+    }],
+
+    ['删除现有记录返回 true，再删返回 false', function () {
+      S.clearAll();
+      var r = S.addRecord(base);
+      eq(S.deleteRecord(r.id), true, '第一次删除');
+      eq(S.deleteRecord(r.id), false, '第二次删除');
+      eq(S.getRecords().length, 0, '删除后条数');
+    }],
+
+    ['getRecords 返回副本，修改不影响存储', function () {
+      S.clearAll();
+      S.addRecord(base);
+      var list = S.getRecords();
+      list[0].amount = 99999;
+      eq(S.getRecords()[0].amount, 25.5, '存储中的金额应保持 25.5');
+    }],
+
+    ['数据真实写入 localStorage（刷新后仍在）', function () {
+      S.clearAll();
+      S.addRecord(base);
+      var raw = window.localStorage.getItem('ledger_records_test');
+      ok(!!raw, 'localStorage 中应存在该键');
+      var parsed = JSON.parse(raw);
+      ok(Array.isArray(parsed) && parsed.length === 1, '存储内容应为 1 条记录的数组');
+      eq(parsed[0].amount, 25.5, '落盘金额');
+    }],
+
+    ['脏数据在读取时被跳过，不导致崩溃', function () {
+      window.localStorage.setItem('ledger_records_test', JSON.stringify([
+        { id: 'record_a', type: 'expense', amount: 10, category: '餐饮', date: '2026-11-07' },
+        { id: 'record_b', type: 'expense', amount: 'abc', category: '餐饮', date: '2026-11-07' },
+        { id: 'record_c', type: 'unknown', amount: 5, category: '餐饮', date: '2026-11-07' }
+      ]));
+      var list = S.getRecords();
+      eq(list.length, 1, '只应保留 1 条合法记录');
+      eq(list[0].id, 'record_a', '保留的是第一条');
+    }],
+
+    ['seedIfEmpty 只在空库时写入演示数据', function () {
+      S.clearAll();
+      eq(S.seedIfEmpty([base, base]), 2, '空库首次写入条数');
+      eq(S.seedIfEmpty([base]), 0, '非空库不再写入');
+      eq(S.getRecords().length, 2, '最终条数');
+    }]
+  ];
+
+  function runAll() {
+    tbody.innerHTML = '';
+    var pass = 0;
+
+    cases.forEach(function (item, i) {
+      var name = item[0], fn = item[1];
+      var tr = document.createElement('tr');
+      var res, detail;
+      try {
+        fn();
+        pass++;
+        res = '<span class="ok">通过</span>';
+        detail = '断言全部成立';
+      } catch (e) {
+        res = '<span class="no">失败</span>';
+        detail = String(e && e.message ? e.message : e);
+      }
+      tr.innerHTML =
+        '<td class="idx">' + (i + 1) + '</td>' +
+        '<td>' + name + '</td>' +
+        '<td class="res">' + res + '</td>' +
+        '<td>' + detail + '</td>';
+      tbody.appendChild(tr);
+    });
+
+    var total = cases.length;
+    summary.className = 'summary ' + (pass === total ? 'pass' : 'fail');
+    summary.textContent = pass === total
+      ? '全部通过：' + pass + ' / ' + total + ' 条用例'
+      : '存在失败：' + pass + ' / ' + total + ' 条用例通过';
+    summary.textContent += '（' + new Date().toLocaleString('zh-CN') + '）';
+
+    S.clearAll();   // 跑完清场，避免污染下次测试
+  }
+
+  runAll();
+})();
+</script>
+</body>
+</html>
