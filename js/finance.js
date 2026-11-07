@@ -1,17 +1,24 @@
-// js/finance.js
-// 个人记账本 · 财务计算模块（S4）
-// 职责：总收入、总支出、余额、本月汇总、类别统计、每日趋势
-// 依赖：无。输入统一为 storage.js 产出的记录数组：
-//   { id, type: 'income'|'expense', amount: Number, category: String,
-//     date: 'YYYY-MM-DD', note: String, createdAt, updatedAt }
-//
-// 对外接口：window.Finance（浏览器）/ module.exports（Node 测试）
-//
-// 设计约定：
-//   1. 金额统一以“分”为单位累加，最后再除以 100，减少浮点误差累积；
-//   2. 非数组、null 记录、非法金额、非法日期一律跳过，不抛异常；
-//   3. 金额必须为正数，负数、0、Infinity、NaN 均不计入统计；
-//   4. 月份参数统一为 'YYYY-MM'，不传时使用当前月份。
+
+ // js/finance.js
+ // 个人记账本 · 财务计算模块（S4）
+ // 职责：总收入、总支出、余额、本月汇总、类别统计、每日趋势
+ // 依赖：输入统一为 records 数组，遵循《开发规范 V1.0》：
+ //   {
+ //     id: String,
+ //     type: 'income'|'expense',
+ //     amount: Number,
+ //     category: String,
+ //     date: 'YYYY-MM-DD',
+ //     note: String
+ //   }
+ //
+ // 对外接口：window.Finance（浏览器）/ module.exports（Node 测试）
+ //
+ // 设计约定：
+ //   1. 金额统一以“分”为单位累加，最后再除以 100，减少浮点误差累积；
+ //   2. 非数组、null 记录、非法金额、非法日期一律跳过，不抛异常；
+ //   3. 金额必须为正数，负数、0、Infinity、NaN 均不计入统计；
+ //   4. 月份参数统一为 'YYYY-MM'，不传时使用当前月份。
 
 (function (root) {
   'use strict';
@@ -20,6 +27,36 @@
   const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
   /* ---------------- 内部工具 ---------------- */
+
+  // 严格校验真实日期
+  function isValidDate(date) {
+    if (typeof date !== 'string' || !DATE_RE.test(date)) {
+      return false;
+    }
+
+    const [year, month, day] = date.split('-').map(Number);
+
+    // 使用闰年规则和月份天数判断，避免 Date 对 0-99 年的特殊处理
+    const isLeapYear =
+      year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+
+    const daysInMonth = [
+      31,
+      isLeapYear ? 29 : 28,
+      31,
+      30,
+      31,
+      30,
+      31,
+      31,
+      30,
+      31,
+      30,
+      31
+    ];
+
+    return day >= 1 && day <= daysInMonth[month - 1];
+  }
 
   // 当前月份，格式 YYYY-MM
   function currentMonth() {
@@ -30,15 +67,18 @@
   // 校验月份参数；非法值回退到当前月份，避免页面统计直接崩掉
   function resolveMonth(month) {
     if (typeof month === 'string' && MONTH_RE.test(month)) return month;
+
     if (month !== undefined && month !== null && month !== '') {
       console.warn('[finance] 月份参数应为 "YYYY-MM"，已回退为当前月份：', month);
     }
+
     return currentMonth();
   }
 
   // 安全地把金额转为“分”。只接受数字或非空数字字符串，其余一律视为 0
   function toCents(val) {
     let num;
+
     if (typeof val === 'number') {
       num = val;
     } else if (typeof val === 'string' && val.trim() !== '') {
@@ -46,7 +86,9 @@
     } else {
       return 0;
     }
+
     if (!Number.isFinite(num) || num <= 0) return 0;
+
     return Math.round((num + Number.EPSILON) * 100);
   }
 
@@ -54,8 +96,9 @@
     return Math.round(cents) / 100;
   }
 
+  // 获取记录月份；非法日期返回空字符串
   function recordMonth(record) {
-    return typeof record.date === 'string' ? record.date.slice(0, 7) : '';
+    return isValidDate(record.date) ? record.date.slice(0, 7) : '';
   }
 
   function normalizeCategory(category) {
@@ -66,34 +109,50 @@
   // 累加满足条件的金额（单位：分）
   function sumCents(records, predicate) {
     if (!Array.isArray(records)) return 0;
+
     let cents = 0;
+
     for (let i = 0; i < records.length; i += 1) {
       const record = records[i];
+
       if (!record || typeof record !== 'object') continue;
       if (!predicate(record)) continue;
+
       cents += toCents(record.amount);
     }
+
     return cents;
   }
 
   // 一次性统计总收入/总支出（单位：分）
+  // 非法日期记录不参与任何统计
   function totalsCents(records) {
     let income = 0;
     let expense = 0;
+
     if (!Array.isArray(records)) return { income, expense };
+
     for (let i = 0; i < records.length; i += 1) {
       const record = records[i];
+
       if (!record || typeof record !== 'object') continue;
+      if (!isValidDate(record.date)) continue;
+
       const cents = toCents(record.amount);
+
       if (record.type === 'income') income += cents;
       else if (record.type === 'expense') expense += cents;
     }
+
     return { income, expense };
   }
 
   // 指定月份的某类金额（单位：分）
   function monthlyCents(records, type, month) {
-    return sumCents(records, (r) => r.type === type && recordMonth(r) === month);
+    return sumCents(
+      records,
+      (r) => r.type === type && recordMonth(r) === month
+    );
   }
 
   /* ---------------- 对外计算函数 ---------------- */
@@ -127,27 +186,30 @@
   // 本月结余
   function calculateMonthlyBalance(records, month) {
     const m = resolveMonth(month);
+
     return fromCents(
-      monthlyCents(records, 'income', m) - monthlyCents(records, 'expense', m)
+      monthlyCents(records, 'income', m) -
+      monthlyCents(records, 'expense', m)
     );
   }
 
   // 首页汇总：一次调用拿全部数字
-function calculateSummary(records, month) {
-  const m = resolveMonth(month);
-  const totals = totalsCents(records);
-  const monthIncome = monthlyCents(records, 'income', m);
-  const monthExpense = monthlyCents(records, 'expense', m);
+  function calculateSummary(records, month) {
+    const m = resolveMonth(month);
+    const totals = totalsCents(records);
+    const monthIncome = monthlyCents(records, 'income', m);
+    const monthExpense = monthlyCents(records, 'expense', m);
 
-  return {
-    totalIncome: fromCents(totals.income),
-    totalExpense: fromCents(totals.expense),
-    balance: fromCents(totals.income - totals.expense),
-    monthlyIncome: fromCents(monthIncome),
-    monthlyExpense: fromCents(monthExpense),
-    monthlyBalance: fromCents(monthIncome - monthExpense)
-  };
-}
+    return {
+      totalIncome: fromCents(totals.income),
+      totalExpense: fromCents(totals.expense),
+      balance: fromCents(totals.income - totals.expense),
+      monthlyIncome: fromCents(monthIncome),
+      monthlyExpense: fromCents(monthExpense),
+      monthlyBalance: fromCents(monthIncome - monthExpense)
+    };
+  }
+
   /**
    * 类别统计
    * @param {Array} records 记录数组
@@ -167,7 +229,14 @@ function calculateSummary(records, month) {
     if (Array.isArray(records)) {
       for (let i = 0; i < records.length; i += 1) {
         const record = records[i];
-        if (!record || typeof record !== 'object' || record.type !== type) continue;
+
+        if (!record || typeof record !== 'object' || record.type !== type) {
+          continue;
+        }
+
+        // 统一跳过非法日期
+        if (!isValidDate(record.date)) continue;
+
         if (month && recordMonth(record) !== month) continue;
 
         const cents = toCents(record.amount);
@@ -180,6 +249,7 @@ function calculateSummary(records, month) {
     }
 
     const result = [];
+
     bucket.forEach((cents, category) => {
       result.push({
         category,
@@ -204,20 +274,21 @@ function calculateSummary(records, month) {
    */
   function calculateDailyTrend(records, options) {
     const opts = options || {};
-    const start = typeof opts.startDate === 'string' && DATE_RE.test(opts.startDate)
-      ? opts.startDate
-      : null;
-    const end = typeof opts.endDate === 'string' && DATE_RE.test(opts.endDate)
-      ? opts.endDate
-      : null;
+
+    const start = isValidDate(opts.startDate) ? opts.startDate : null;
+    const end = isValidDate(opts.endDate) ? opts.endDate : null;
 
     const dayMap = new Map();
 
     if (Array.isArray(records)) {
       for (let i = 0; i < records.length; i += 1) {
         const record = records[i];
+
         if (!record || typeof record !== 'object') continue;
-        if (typeof record.date !== 'string' || !DATE_RE.test(record.date)) continue;
+
+        // 统一校验真实日期
+        if (!isValidDate(record.date)) continue;
+
         if (record.type !== 'income' && record.type !== 'expense') continue;
         if (start && record.date < start) continue;
         if (end && record.date > end) continue;
@@ -226,6 +297,7 @@ function calculateSummary(records, month) {
         if (cents <= 0) continue;
 
         let day = dayMap.get(record.date);
+
         if (!day) {
           day = { date: record.date, income: 0, expense: 0 };
           dayMap.set(record.date, day);
