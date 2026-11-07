@@ -1,25 +1,31 @@
 /*!
  * storage.js — 个人记账本 · 数据存储模块（S7）
  * 项目：简记 · 个人财务管理系统
+ * 规范：遵循《个人记账本系统开发规范 V1.0》
  * 职责：LocalStorage 读写、统一数据结构、增删改查的唯一入口
- * 依赖：无（原生 JS，不需要任何框架/构建工具）
- * 引入：<script src="js/storage.js"></script>，必须放在 form.js / records.js / finance.js 之前
+ * 依赖：constants.js（可选，存在时读取 STORAGE_KEY 与 RECORD_TYPES）
+ * 引入：<script src="js/constants.js"></script> 之后、其他业务脚本之前
  *
- * 对外接口（挂在 window.LedgerStorage 上）：
- *   getRecords()              -> Array   取全部记录（按日期倒序，返回的是副本）
- *   saveRecords(records)      -> Number  整表覆盖写入，返回实际写入条数
- *   addRecord(record)         -> Object  新增一条，返回带 id 的完整记录
- *   updateRecord(id, patch)   -> Object  局部更新，返回更新后的记录；找不到返回 null
- *   deleteRecord(id)          -> Boolean 删除成功 true，记录不存在 false
- *   clearAll()                -> void    清空
- *   seedIfEmpty(records)      -> Number  库为空时才写入演示数据
- *   makeId()                  -> String  生成唯一 id
- *   isAvailable()             -> Boolean localStorage 是否可用（false 表示降级为内存模式）
+ * 对外接口（V1.0 规范 3.4 节）：
+ *   LedgerStorage.getRecords()               -> Array   全部记录，按日期倒序，返回副本
+ *   LedgerStorage.addRecord(record)          -> Object  新增，返回带 id 的记录
+ *   LedgerStorage.updateRecord(id, record)   -> Object  更新，返回更新后记录；找不到返回 null
+ *   LedgerStorage.deleteRecord(id)           -> Boolean 成功 true，记录不存在 false
+ *   LedgerStorage.saveRecords(records)       -> Boolean 整体替换是否成功
+ *   LedgerStorage.seedIfEmpty([records])     -> Number  仅空库时初始化，返回写入条数
  *
- * 统一数据结构（所有人必须遵守）：
- *   { id: "record_xxx", type: "income" | "expense", amount: 25.5,
- *     category: "餐饮", date: "2026-11-07", note: "午饭",
- *     createdAt: 1762492800000, updatedAt: 1762492800000 }
+ * 辅助接口（非规范强制，测试与集成可用）：
+ *   LedgerStorage.clearAll()  isAvailable()  makeId()  today()  KEY  getLastError()
+ *
+ * 全局事件（V1.0 规范第 13 条）：
+ *   新增 / 修改 / 删除 / 整体替换导入 / 首次初始化示例数据 成功后，
+ *   在 document 上派发 'ledger:updated'，detail = { action, payload }
+ *   action 取值：add | update | delete | replace | seed
+ *
+ * 统一数据结构（V1.0 2 节，字段名不得修改）：
+ *   { id: "record_001", type: "expense", amount: 25.00,
+ *     category: "餐饮", date: "2026-11-07", note: "午餐" }
+ *   本模块额外维护 createdAt / updatedAt 两个时间戳，其他模块可忽略。
  *
  * 注意：全局对象叫 LedgerStorage，不要改成 Storage ——
  *       window.Storage 是浏览器内置接口，覆盖它会导致 localStorage 整体失效。
@@ -27,10 +33,14 @@
 (function (global) {
   'use strict';
 
-  var KEY = global.LEDGER_STORAGE_KEY || 'ledger_records';
-  var MEMORY = [];          // localStorage 不可用时的兜底存储（仅在当前页面有效）
+  var C = global.LedgerConstants || {};
+  var TYPES = C.RECORD_TYPES || { INCOME: 'income', EXPENSE: 'expense' };
+  var KEY = global.LEDGER_STORAGE_KEY || C.STORAGE_KEY || 'ledger_records';
+
+  var MEMORY = [];          // localStorage 不可用时的兜底存储（仅当前页面有效）
   var available = null;     // 惰性检测结果，null 表示还没测过
   var lastError = null;
+  var silent = false;       // 内部批量写入时临时关闭事件，避免重复触发
 
   /* ---------------- 基础工具 ---------------- */
 
@@ -61,6 +71,26 @@
     return 'record_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
   }
 
+  /** 派发统一事件 ledger:updated，S3/S4/S5/S6 监听它刷新自己 */
+  function emit(action, payload) {
+    if (silent) return;
+    var doc = global.document;
+    if (!doc || typeof doc.dispatchEvent !== 'function') return;
+    var detail = { action: action, payload: payload || null };
+    try {
+      var evt;
+      if (typeof global.CustomEvent === 'function') {
+        evt = new global.CustomEvent('ledger:updated', { detail: detail });
+      } else {
+        evt = doc.createEvent('CustomEvent');
+        evt.initCustomEvent('ledger:updated', true, true, detail);
+      }
+      doc.dispatchEvent(evt);
+    } catch (e) {
+      console.warn('[storage] ledger:updated 事件派发失败', e);
+    }
+  }
+
   function detect() {
     if (available !== null) return available;
     try {
@@ -79,9 +109,9 @@
   /* ---------------- 校验与规范化 ---------------- */
 
   /**
-   * 把外部传进来的对象整理成标准记录
-   * @param {Object} input  原始输入
-   * @param {Boolean} strict true=校验不过就抛错（表单提交用）；false=校验不过返回 null（读文件时跳过脏数据）
+   * 把外部传入的对象整理成规范要求的 Record
+   * @param {Object} input 原始输入
+   * @param {Boolean} strict true=校验不过抛错（表单提交用）；false=返回 null（读取时跳过脏数据）
    */
   function buildRecord(input, strict) {
     function fail(msg) {
@@ -91,33 +121,33 @@
 
     if (!input || typeof input !== 'object') return fail('记录必须是一个对象');
 
-    // 类型
+    // type：只允许 income / expense
     var type = input.type;
-    if (type !== 'income' && type !== 'expense') {
-      return fail('type 只能是 "income"（收入）或 "expense"（支出）');
+    if (type !== TYPES.INCOME && type !== TYPES.EXPENSE) {
+      return fail('type 只能是 "' + TYPES.INCOME + '"（收入）或 "' + TYPES.EXPENSE + '"（支出）');
     }
 
-    // 金额：允许 "25.50"、"¥25.5" 这类写法，但必须能转成数字
+    // amount：允许 "25.50"、"¥25.5"，统一转数字并保留两位小数
     var rawAmount = typeof input.amount === 'string'
       ? input.amount.replace(/[,，\s￥¥$]/g, '')
       : input.amount;
     var amount = Number(rawAmount);
     if (!isFinite(amount)) return fail('amount 必须是数字，当前为：' + input.amount);
     if (amount <= 0) return fail('amount 必须大于 0');
-    amount = Math.round(amount * 100) / 100;   // 统一保留两位小数
+    amount = Math.round(amount * 100) / 100;
 
-    // 日期：必须是真实存在的 YYYY-MM-DD
+    // date：必须是真实存在的 YYYY-MM-DD
     var date = input.date == null ? '' : String(input.date).trim();
     if (!isRealDate(date)) return fail('date 必须是真实日期，格式 YYYY-MM-DD，当前为：' + input.date);
 
-    // 类别
+    // category
     var category = input.category == null ? '' : String(input.category).trim();
     if (!category) {
       if (strict) return fail('category 不能为空');
       category = '其他';
     }
 
-    // 备注（可空，限长避免撑爆列表）
+    // note：可空，限长避免撑爆列表
     var note = input.note == null ? '' : String(input.note).trim();
     if (note.length > 60) note = note.slice(0, 60);
 
@@ -170,19 +200,14 @@
       MEMORY = list.slice();
       return;
     }
-    try {
-      global.localStorage.setItem(KEY, JSON.stringify(list));
-    } catch (e) {
-      lastError = e;
-      throw new Error('保存失败：浏览器存储空间不足或被禁用（' + (e && e.name) + '）');
-    }
+    global.localStorage.setItem(KEY, JSON.stringify(list));   // 失败时抛出，由调用方转成 false
   }
 
   function readClean() {
     var raw = readRaw();
     var out = [];
     for (var i = 0; i < raw.length; i++) {
-      var rec = buildRecord(raw[i], false);   // 脏数据直接跳过，不让一条坏数据搞崩整个列表
+      var rec = buildRecord(raw[i], false);   // 脏数据跳过，不让一条坏数据搞崩整个列表
       if (rec) out.push(rec);
     }
     out.sort(function (a, b) {
@@ -195,51 +220,67 @@
   /* ---------------- 对外接口 ---------------- */
 
   function getRecords() {
-    return readClean().map(clone);   // 返回副本，调用方改了不会污染存储
+    return readClean().map(clone);   // 返回副本，调用方改了不污染存储
   }
 
   function saveRecords(records) {
-    if (!Array.isArray(records)) throw new Error('saveRecords 需要一个数组');
+    if (!Array.isArray(records)) {
+      console.error('[storage] saveRecords 需要一个数组');
+      return false;
+    }
     var clean = [];
     for (var i = 0; i < records.length; i++) {
       var rec = buildRecord(records[i], false);
       if (rec) clean.push(rec);
     }
-    writeRaw(clean);
-    return clean.length;
+    try {
+      writeRaw(clean);
+    } catch (e) {
+      lastError = e;
+      console.error('[storage] 整体写入失败：', e);
+      return false;
+    }
+    emit('replace', { count: clean.length });
+    return true;
   }
 
   function addRecord(input) {
     var rec = buildRecord(input, true);
-    var list = readRaw().map(function (r) { return buildRecord(r, false); })
-                        .filter(function (r) { return r !== null; });
+    var list = readClean();
     list.push(rec);
     writeRaw(list);
+    emit('add', clone(rec));
     return clone(rec);
   }
 
-  function updateRecord(id, patch) {
+  /**
+   * 更新记录
+   * @param {String} id
+   * @param {Object} updatedRecord 完整记录或局部字段（如只传 {amount: 99}），两种都支持
+   */
+  function updateRecord(id, updatedRecord) {
     if (!id) return null;
     var list = readClean();
-    var target = null;
+    var index = -1;
     for (var i = 0; i < list.length; i++) {
-      if (list[i].id === String(id)) { target = i; break; }
+      if (list[i].id === String(id)) { index = i; break; }
     }
-    if (target === null) return null;
+    if (index === -1) return null;
 
-    var merged = clone(list[target]);
-    if (patch && typeof patch === 'object') {
-      for (var k in patch) {
-        if (Object.prototype.hasOwnProperty.call(patch, k)) merged[k] = patch[k];
+    var merged = clone(list[index]);
+    if (updatedRecord && typeof updatedRecord === 'object') {
+      for (var k in updatedRecord) {
+        if (Object.prototype.hasOwnProperty.call(updatedRecord, k)) merged[k] = updatedRecord[k];
       }
     }
-    merged.id = list[target].id;
-    merged.createdAt = list[target].createdAt;
+    merged.id = list[index].id;
+    merged.createdAt = list[index].createdAt;
 
-    var next = buildRecord(merged, true);   // 改完也要过一遍校验
+    var next = buildRecord(merged, true);   // 改完同样要过校验
     next.updatedAt = Date.now();
-    list[target] = next;
+    list[index] = next;
     writeRaw(list);
+    emit('update', clone(next));
     return clone(next);
   }
 
@@ -254,17 +295,40 @@
     }
     if (!removed) return false;
     writeRaw(next);
+    emit('delete', { id: String(id) });
     return true;
+  }
+
+  /**
+   * 仅当库为空时初始化示例数据（V1.0 3.11）
+   * @param {Array} [records] 不传时自动取 Ledger.DemoData.getRecords()；
+   *                          demo-data.js 未加载时不写入，返回 0
+   * @returns {Number} 实际写入条数
+   */
+  function seedIfEmpty(records) {
+    if (readClean().length > 0) return 0;
+
+    var data = records;
+    if (!Array.isArray(data)) {
+      var demo = global.Ledger && global.Ledger.DemoData;
+      data = demo && typeof demo.getRecords === 'function' ? demo.getRecords() : null;
+    }
+    if (!Array.isArray(data) || data.length === 0) return 0;
+
+    var clean = [];
+    for (var i = 0; i < data.length; i++) {
+      var rec = buildRecord(data[i], false);
+      if (rec) clean.push(rec);
+    }
+    if (clean.length === 0) return 0;
+
+    writeRaw(clean);
+    emit('seed', { count: clean.length });
+    return clean.length;
   }
 
   function clearAll() {
     writeRaw([]);
-  }
-
-  function seedIfEmpty(records) {
-    if (!Array.isArray(records)) return 0;
-    if (readClean().length > 0) return 0;
-    return saveRecords(records);
   }
 
   function isAvailable() {
@@ -274,19 +338,19 @@
   global.LedgerStorage = {
     KEY: KEY,
     getRecords: getRecords,
-    saveRecords: saveRecords,
     addRecord: addRecord,
     updateRecord: updateRecord,
     deleteRecord: deleteRecord,
-    clearAll: clearAll,
+    saveRecords: saveRecords,
     seedIfEmpty: seedIfEmpty,
-    makeId: makeId,
+    clearAll: clearAll,
     isAvailable: isAvailable,
+    makeId: makeId,
     today: today,
     getLastError: function () { return lastError; }
   };
 
-  // 兼容 Node 环境下的单元测试（浏览器里这段不生效，不占体积）
+  // 兼容 Node 环境下的单元测试（浏览器里这段不生效）
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = global.LedgerStorage;
   }

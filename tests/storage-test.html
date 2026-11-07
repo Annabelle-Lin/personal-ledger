@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>storage.js 自测 · S7 数据存储</title>
+<title>storage.js 自测 · S7 数据存储（V1.0 规范）</title>
 <style>
   * { box-sizing: border-box; }
   body {
@@ -12,7 +12,7 @@
     font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
     font-size: 14px; line-height: 1.6;
   }
-  .wrap { max-width: 880px; margin: 0 auto; }
+  .wrap { max-width: 900px; margin: 0 auto; }
   h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
   .meta { color: #888780; font-size: 13px; margin: 0 0 20px; }
   .summary {
@@ -47,7 +47,7 @@
 <body>
 <div class="wrap">
   <h1>storage.js 自测报告</h1>
-  <p class="meta">S7 数据存储模块 · LocalStorage 读写 · 提交人：姜思源 102402110</p>
+  <p class="meta">S7 数据存储模块 · 遵循《开发规范 V1.0》· 提交人：姜思源 102402110</p>
 
   <div id="summary" class="summary">正在运行…</div>
 
@@ -59,13 +59,31 @@
   </table>
 
   <p class="tip">
-    本页使用独立存储键 <code>ledger_records_test</code>，不会影响正式数据 <code>ledger_records</code>。
-    请通过 <code>file://</code> 或本地服务器打开本页（浏览器直接双击即可）。
+    本页通过 <code>LedgerConstants.STORAGE_KEY</code> 指向独立的测试键 <code>ledger_records_test</code>，不会影响正式数据。
+    请用浏览器打开本页，或在项目根目录执行 <code>python -m http.server 8000</code> 后访问
+    <code>http://localhost:8000/tests/storage-test.html</code>。
   </p>
   <button onclick="runAll()">重新运行</button>
 </div>
 
-<script>window.LEDGER_STORAGE_KEY = 'ledger_records_test';</script>
+<script>
+  // 模拟 constants.js：验证 storage.js 会读取 LedgerConstants.STORAGE_KEY 与 RECORD_TYPES
+  window.LedgerConstants = {
+    STORAGE_KEY: 'ledger_records_test',
+    RECORD_TYPES: { INCOME: 'income', EXPENSE: 'expense' }
+  };
+  // 模拟 S12 的 demo-data.js：验证 seedIfEmpty() 无参时自动取示例数据
+  window.Ledger = {
+    DemoData: {
+      getRecords: function () {
+        return [
+          { id: 'record_demo_01', type: 'income', amount: 3200, category: '工资', date: '2026-11-05', note: '11月工资' },
+          { id: 'record_demo_02', type: 'expense', amount: 25.5, category: '餐饮', date: '2026-11-06', note: '午饭' }
+        ];
+      }
+    }
+  };
+</script>
 <script src="../js/storage.js"></script>
 <script>
 (function () {
@@ -85,28 +103,34 @@
     try { fn(); } catch (e) { return e; }
     throw new Error(msg);
   }
-  var base = { type: 'expense', amount: 25.5, category: '餐饮', date: '2026-11-07', note: '午饭' };
+  var base = { type: 'expense', amount: 25.5, category: '餐饮', date: '2026-11-07', note: '午餐' };
 
   var cases = [
+    ['存储键取自 LedgerConstants.STORAGE_KEY', function () {
+      eq(S.KEY, 'ledger_records_test', 'KEY');
+    }],
+
     ['空库初始化返回空数组', function () {
       S.clearAll();
       eq(S.getRecords().length, 0, 'getRecords 长度');
     }],
 
-    ['新增记录返回 id 与时间戳', function () {
+    ['addRecord 返回带 id 与时间戳的记录', function () {
       S.clearAll();
       var r = S.addRecord(base);
       ok(typeof r.id === 'string' && r.id.indexOf('record_') === 0, 'id 前缀应为 record_');
-      ok(r.createdAt > 0, 'createdAt 应大于 0');
+      ok(r.createdAt > 0 && r.updatedAt > 0, '时间戳应存在');
       eq(r.type, 'expense', 'type');
       eq(r.amount, 25.5, 'amount');
     }],
 
-    ['新增后可以读回 1 条', function () {
+    ['记录字段与规范 V1.0 完全一致', function () {
       S.clearAll();
-      S.addRecord(base);
-      eq(S.getRecords().length, 1, '记录条数');
-      eq(S.getRecords()[0].category, '餐饮', 'category');
+      var r = S.addRecord({ type: 'expense', amount: 25, category: '餐饮', date: '2026-11-07', note: '午餐' });
+      ['id', 'type', 'amount', 'category', 'date', 'note'].forEach(function (k) {
+        ok(Object.prototype.hasOwnProperty.call(r, k), '缺少规范字段：' + k);
+      });
+      eq(r.note, '午餐', 'note');
     }],
 
     ['金额字符串自动清洗并保留两位小数', function () {
@@ -151,24 +175,33 @@
       eq(list[2].date, '2026-11-01', '第三条日期');
     }],
 
-    ['更新记录金额生效', function () {
+    ['updateRecord 支持局部更新并返回新记录', function () {
       S.clearAll();
       var r = S.addRecord(base);
       var u = S.updateRecord(r.id, { amount: 88.8, note: '改成晚饭' });
       eq(u.amount, 88.8, '更新后金额');
-      eq(S.getRecords()[0].note, '改成晚饭', '更新后备注');
+      eq(u.note, '改成晚饭', '更新后备注');
+      eq(u.id, r.id, 'id 不变');
+      eq(S.getRecords()[0].note, '改成晚饭', '已落盘');
     }],
 
-    ['更新不存在的 id 返回 null', function () {
+    ['updateRecord 找不到 id 返回 null', function () {
       eq(S.updateRecord('record_not_exist', { amount: 1 }), null, '返回值');
     }],
 
-    ['删除现有记录返回 true，再删返回 false', function () {
+    ['deleteRecord 返回 true / false', function () {
       S.clearAll();
       var r = S.addRecord(base);
       eq(S.deleteRecord(r.id), true, '第一次删除');
       eq(S.deleteRecord(r.id), false, '第二次删除');
       eq(S.getRecords().length, 0, '删除后条数');
+    }],
+
+    ['saveRecords 返回布尔值（规范要求）', function () {
+      S.clearAll();
+      eq(S.saveRecords([base, base]), true, '写入应返回 true');
+      eq(S.getRecords().length, 2, '写入条数');
+      eq(S.saveRecords('not-an-array'), false, '非数组应返回 false');
     }],
 
     ['getRecords 返回副本，修改不影响存储', function () {
@@ -179,7 +212,7 @@
       eq(S.getRecords()[0].amount, 25.5, '存储中的金额应保持 25.5');
     }],
 
-    ['数据真实写入 localStorage（刷新后仍在）', function () {
+    ['数据真实写入 localStorage', function () {
       S.clearAll();
       S.addRecord(base);
       var raw = window.localStorage.getItem('ledger_records_test');
@@ -200,11 +233,34 @@
       eq(list[0].id, 'record_a', '保留的是第一条');
     }],
 
-    ['seedIfEmpty 只在空库时写入演示数据', function () {
+    ['seedIfEmpty 无参时自动取 Ledger.DemoData 数据', function () {
       S.clearAll();
-      eq(S.seedIfEmpty([base, base]), 2, '空库首次写入条数');
-      eq(S.seedIfEmpty([base]), 0, '非空库不再写入');
+      eq(S.seedIfEmpty(), 2, '应写入示例数据 2 条');
+      eq(S.seedIfEmpty(), 0, '非空库不再写入');
       eq(S.getRecords().length, 2, '最终条数');
+    }],
+
+    ['新增记录派发 ledger:updated 事件（规范第 13 条）', function () {
+      S.clearAll();
+      var fired = null;
+      function onUpdate(e) { fired = e.detail; }
+      document.addEventListener('ledger:updated', onUpdate);
+      S.addRecord(base);
+      document.removeEventListener('ledger:updated', onUpdate);
+      ok(fired !== null, '应派发 ledger:updated');
+      eq(fired.action, 'add', 'detail.action');
+      eq(fired.payload.amount, 25.5, 'detail.payload 应为新记录');
+    }],
+
+    ['删除记录派发 ledger:updated 事件', function () {
+      S.clearAll();
+      var r = S.addRecord(base);
+      var fired = null;
+      function onUpdate(e) { fired = e.detail; }
+      document.addEventListener('ledger:updated', onUpdate);
+      S.deleteRecord(r.id);
+      document.removeEventListener('ledger:updated', onUpdate);
+      ok(fired !== null && fired.action === 'delete', '应派发 delete 事件');
     }]
   ];
 
@@ -235,12 +291,12 @@
 
     var total = cases.length;
     summary.className = 'summary ' + (pass === total ? 'pass' : 'fail');
-    summary.textContent = pass === total
+    summary.textContent = (pass === total
       ? '全部通过：' + pass + ' / ' + total + ' 条用例'
-      : '存在失败：' + pass + ' / ' + total + ' 条用例通过';
-    summary.textContent += '（' + new Date().toLocaleString('zh-CN') + '）';
+      : '存在失败：' + pass + ' / ' + total + ' 条用例通过')
+      + '（' + new Date().toLocaleString('zh-CN') + '）';
 
-    S.clearAll();   // 跑完清场，避免污染下次测试
+    S.clearAll();
   }
 
   runAll();
