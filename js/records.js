@@ -408,26 +408,21 @@
      *
      * Ledger.Records.deleteRecord(id)
      */
-    Records.deleteRecord = function (id) {
-        if (!window.LedgerStorage) {
-            console.error("LedgerStorage 未加载，无法删除账单。");
-            return false;
-        }
+ Records.deleteRecord = function (id) {
+    if (!window.LedgerStorage) {
+        console.error("LedgerStorage 未加载，无法删除账单。");
+        return false;
+    }
 
-        const success = window.LedgerStorage.deleteRecord(id);
+    const success = window.LedgerStorage.deleteRecord(id);
 
-        if (!success) {
-            console.error("删除账单失败，记录不存在或存储操作失败。");
-            return false;
-        }
+    if (!success) {
+        console.error("删除账单失败，记录不存在或存储操作失败。");
+        return false;
+    }
 
-        // 通知其他模块账单数据已经更新
-        document.dispatchEvent(
-            new CustomEvent("ledger:updated")
-        );
-
-        return true;
-    };
+    return true;
+};
 
     // 暴露模块
     window.Ledger.Records = Records;
