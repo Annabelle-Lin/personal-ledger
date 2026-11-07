@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh‑CN">
+<head>
+    <meta charset="UTF‑8">
+    <meta name="viewport" content="width=device‑width, initial‑scale=1.0">
+    <title>个人记账本</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>个人记账本</h1>
+        </header>
+
+        <!-- S2 收支表单容器 -->
+        <div id="form-container"></div>
+
+        <!-- S5 筛选区域容器 -->
+        <div id="filter-container"></div>
+
+        <!-- S4 财务统计容器 -->
+        <div id="summary-container"></div>
+
+        <!-- S3 收支记录列表容器 -->
+        <div id="records-container"></div>
+
+        <!-- S6 图表容器 -->
+        <div id="charts-container"></div>
+
+        <!-- S8 导入导出控件 -->
+        <div>
+            <button id="btn‑export">导出JSON</button>
+            <button id="btn‑import">导入JSON</button>
+            <input type="file" id="file‑import" accept=".json" style="display: none;">
+        </div>
+    </div>
+
+    <!-- 下面script顺序和md文档完全一模一样，禁止调换 -->
+    <script src="js/constants.js"></script>
+    <script src="js/storage.js"></script>
+    <script src="js/form.js"></script>
+    <script src="js/records.js"></script>
+    <script src="js/finance.js"></script>
+    <!-- 按规范：本地chart库，放在finance之后、charts之前 -->
+    <script src="vendor/chart.umd.min.js"></script>
+    <script src="js/filter.js"></script>
+    <script src="js/charts.js"></script>
+    <script src="js/export.js"></script>
+    <script src="js/demo-data.js"></script>
+    <script src="js/app.js"></script>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            Ledger.App.init();
+        });
+    </script>
+</body>
+</html>
