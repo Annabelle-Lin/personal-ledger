@@ -2,7 +2,7 @@
  * storage.js — 个人记账本 · 数据存储模块（S7）
  * 项目：简记 · 个人财务管理系统
  * 职责：LocalStorage 读写、统一数据结构、增删改查的唯一入口
- * 依赖：无（原生 JS，不需要任何框架/构建工具）
+ * 依赖：原生 JS
  * 引入：<script src="js/storage.js"></script>，必须放在 form.js / records.js / finance.js 之前
  *
  * 对外接口（挂在 window.LedgerStorage 上）：
@@ -16,19 +16,19 @@
  *   makeId()                  -> String  生成唯一 id
  *   isAvailable()             -> Boolean localStorage 是否可用（false 表示降级为内存模式）
  *
- * 统一数据结构（所有人必须遵守）：
+ * 数据结构：
  *   { id: "record_xxx", type: "income" | "expense", amount: 25.5,
  *     category: "餐饮", date: "2026-11-07", note: "午饭",
  *     createdAt: 1762492800000, updatedAt: 1762492800000 }
  *
- * 注意：全局对象叫 LedgerStorage，不要改成 Storage ——
+ * 注意：全局对象叫 LedgerStorage，——
  *       window.Storage 是浏览器内置接口，覆盖它会导致 localStorage 整体失效。
  */
 (function (global) {
   'use strict';
 
   var KEY = global.LEDGER_STORAGE_KEY || 'ledger_records';
-  var MEMORY = [];          // localStorage 不可用时的兜底存储（仅在当前页面有效）
+  var MEMORY = [];          // localStorage 不可用时的兜底存储
   var available = null;     // 惰性检测结果，null 表示还没测过
   var lastError = null;
 
@@ -81,7 +81,7 @@
   /**
    * 把外部传进来的对象整理成标准记录
    * @param {Object} input  原始输入
-   * @param {Boolean} strict true=校验不过就抛错（表单提交用）；false=校验不过返回 null（读文件时跳过脏数据）
+   * @param {Boolean} strict true=校验不过就抛错；false=校验不过返回 null
    */
   function buildRecord(input, strict) {
     function fail(msg) {
@@ -97,7 +97,7 @@
       return fail('type 只能是 "income"（收入）或 "expense"（支出）');
     }
 
-    // 金额：允许 "25.50"、"¥25.5" 这类写法，但必须能转成数字
+    // 金额：允许 "25.50" 这类写法，但必须能转成数字
     var rawAmount = typeof input.amount === 'string'
       ? input.amount.replace(/[,，\s￥¥$]/g, '')
       : input.amount;
@@ -106,7 +106,7 @@
     if (amount <= 0) return fail('amount 必须大于 0');
     amount = Math.round(amount * 100) / 100;   // 统一保留两位小数
 
-    // 日期：必须是真实存在的 YYYY-MM-DD
+    // 日期
     var date = input.date == null ? '' : String(input.date).trim();
     if (!isRealDate(date)) return fail('date 必须是真实日期，格式 YYYY-MM-DD，当前为：' + input.date);
 
@@ -117,7 +117,7 @@
       category = '其他';
     }
 
-    // 备注（可空，限长避免撑爆列表）
+    // 备注
     var note = input.note == null ? '' : String(input.note).trim();
     if (note.length > 60) note = note.slice(0, 60);
 
@@ -286,7 +286,7 @@
     getLastError: function () { return lastError; }
   };
 
-  // 兼容 Node 环境下的单元测试（浏览器里这段不生效，不占体积）
+  // 兼容 Node 环境下的单元测试
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = global.LedgerStorage;
   }
