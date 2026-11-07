@@ -47,9 +47,19 @@
 
 | 轮次 | 时间 | 通过数 / 总数 | 相比上次变化 | 说明 |
 |---|---|---|---|---|
-| 第1轮（集成前） |  | / | — |  |
+| 第1轮（集成前自验） | 15:16 | 5 / 12 | — | S9 用 Node 直接对接 S7 真实 storage.js 实测：storage 增/删/改/种子/持久化 **5项全过**；其余7项为 S2/S4/S5/S8 模块未就绪，待合并后激活 |
 | 第2轮（15:30集成后） |  | / |  |  |
 | 第3轮（16:00测试阶段） |  | / |  |  |
+
+### 各模块接口对接进度（S9 跟踪）
+
+| 模块 | 负责人 | 接口状态 | S9 验证情况 |
+|---|---|---|---|
+| storage.js | S7 | ✅ 已确认：LedgerStorage.getRecords/saveRecords/addRecord/updateRecord/deleteRecord/seedIfEmpty/clearAll，键 ledger_records | ✅ S7 自测 16/16 通过；S9 Node 实测 5/5 通过 |
+| export.js | S8 | ✅ 已确认：全局函数 exportToJSON() / importFromJSON(file)，依赖 S1 的按钮元素 | ⏳ 代码未合并，面板先做接口存在性检查 |
+| finance.js | S4 | ⏳ 待 S4 提供函数名 | 待测 |
+| filter.js | S5 | ⏳ 待 S5 提供函数名 | 待测 |
+| form.js | S2 | ⏳ 待 S2 提供函数名 | 待测 |
 
 ---
 
