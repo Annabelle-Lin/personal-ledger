@@ -133,23 +133,21 @@
   }
 
   // 首页汇总：一次调用拿全部数字
-  function calculateSummary(records, month) {
-    const m = resolveMonth(month);
-    const totals = totalsCents(records);
-    const monthIncome = monthlyCents(records, 'income', m);
-    const monthExpense = monthlyCents(records, 'expense', m);
+function calculateSummary(records, month) {
+  const m = resolveMonth(month);
+  const totals = totalsCents(records);
+  const monthIncome = monthlyCents(records, 'income', m);
+  const monthExpense = monthlyCents(records, 'expense', m);
 
-    return {
-      month: m,
-      totalIncome: fromCents(totals.income),
-      totalExpense: fromCents(totals.expense),
-      balance: fromCents(totals.income - totals.expense),
-      monthIncome: fromCents(monthIncome),
-      monthExpense: fromCents(monthExpense),
-      monthBalance: fromCents(monthIncome - monthExpense)
-    };
-  }
-
+  return {
+    totalIncome: fromCents(totals.income),
+    totalExpense: fromCents(totals.expense),
+    balance: fromCents(totals.income - totals.expense),
+    monthlyIncome: fromCents(monthIncome),
+    monthlyExpense: fromCents(monthExpense),
+    monthlyBalance: fromCents(monthIncome - monthExpense)
+  };
+}
   /**
    * 类别统计
    * @param {Array} records 记录数组
