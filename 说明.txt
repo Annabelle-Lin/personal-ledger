@@ -1,0 +1,53 @@
+﻿════════════════════════════════════════════
+  S12 示例数据 —— v2 提交说明（全组统一提交）
+════════════════════════════════════════════
+
+【你要提交的文件】
+  js/demo-data.js
+
+【本次改了什么（可直接贴 PR 描述）】
+本模块在 v2 里没有功能改动（与 develop 上字节一致），只在文件顶部补了一行“v2 回归”复核注释，目的是让这次 PR 不是空的、留下 v2 的协作记录。业务代码一行没动。
+
+【第一步（必须，否则 PR 会很脏）】
+develop 上已经合并了 v1。如果你直接在旧代码上覆盖提交，
+PR 会显示成“整个文件重写”（把 v1 的改动也算成你的），审查会被退回。
+所以先同步：
+
+    git fetch origin
+    git checkout feature/S12-demo
+    git pull origin develop        # 这一步最关键
+
+    如果提示分支不存在（合并后被删了），从最新 develop 重建：
+    git checkout -B feature/S12-demo origin/develop
+
+【第二步：覆盖、提交、推送】
+    # 用本文件夹里的文件，覆盖仓库里对应位置的文件
+    git add js/demo-data.js
+    git status                     # 确认暂存区里只有你自己这几个文件
+    git commit -m "docs(S12): v2 回归复核，本模块无需改动"
+    git push -u origin feature/S12-demo
+
+    （push 报 non-fast-forward 时，加 --force-with-lease 再推一次：
+      git push -u origin feature/S12-demo --force-with-lease）
+
+【第三步：开 PR】
+    GitHub 开 Pull Request：feature/S12-demo → develop
+    标题用上面的 commit message；描述里写：改了什么 + 怎么自测的 + 一张截图
+
+【不想用命令行？网页也行】
+    1) GitHub 打开仓库 → 左上角分支下拉框切到 develop
+    2) 打开你负责的那个文件 → 右上角铅笔图标 Edit
+    3) 全选删除，粘贴本文件夹里同名文件的全部内容
+    4) Commit changes → 选 "Create a new branch for this commit"
+       分支名填 feature/S12-demo → Propose changes → 开 PR 到 develop
+
+【怎么判断 PR 是对的】
+    改动只落在你负责的文件里，diff 只有几十到几百行。
+    如果显示“整个文件删除又新增”，或改到了别人的文件，
+    说明没有先 pull 最新 develop，退回去重来。
+
+
+【纪律】
+- 只 git add 自己的文件，绝对不要 git add .；
+- PR 的目标分支是 develop，不要直接推 develop / main；
+- 分支沿用你原来的 feature/S12-demo，不要另起新名字。
