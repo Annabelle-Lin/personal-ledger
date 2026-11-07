@@ -202,10 +202,22 @@ defTest('form', 'form：金额为负数应被拒绝', () => {
   assert(_isInvalid(_FORM.validateAmount(-5)), '负数金额应判定为非法');
 });
 
-defTest('form', 'form：金额含字母/为空应被拒绝', () => {
+defTest('form', 'form：金额含字母/为空/0 应被拒绝', () => {
   assert(_FORM.validateAmount, 'Ledger.Form.validateAmount 未定义');
   assert(_isInvalid(_FORM.validateAmount('abc')), '字母金额应非法');
   assert(_isInvalid(_FORM.validateAmount('')), '空金额应非法');
+  assert(_isInvalid(_FORM.validateAmount(0)), '金额为 0 应非法');
+});
+
+defTest('form', 'form：超两位小数/科学计数法应被拒绝（S2 校验规则）', () => {
+  assert(_FORM.validateAmount, 'Ledger.Form.validateAmount 未定义');
+  assert(_isInvalid(_FORM.validateAmount('1.234')), '三位小数应非法（最多两位）');
+  assert(_isInvalid(_FORM.validateAmount('1e5')), '科学计数法应非法');
+  const ok = _FORM.validateAmount('25.50');
+  assert(_isValid(ok), '两位小数的正常金额应通过');
+  if (ok && ok.value !== undefined) {
+    assert(Math.abs(ok.value - 25.5) < 1e-9, '通过时应返回数字 value=25.5');
+  }
 });
 
 defTest('form', 'form：必填项缺失应被拒绝并给出错误提示', () => {
