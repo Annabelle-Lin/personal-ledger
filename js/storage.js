@@ -1,3 +1,4 @@
+// v2 回归（2026-11-07）：本模块在 v2 中无需改动，已与 develop 对齐复核。
 /*!
  * storage.js — 个人记账本 · 数据存储模块（S7）
  * 项目：简记 · 个人财务管理系统
@@ -15,12 +16,13 @@
  *   LedgerStorage.seedIfEmpty([records])     -> Number  仅空库时初始化，返回写入条数
  *
  * 辅助接口（非规范强制，测试与集成可用）：
- *   LedgerStorage.clearAll()  isAvailable()  makeId()  today()  KEY  getLastError()
+ *   LedgerStorage.clearAll()  allowSeedAgain()  isAvailable()  makeId()  today()
+ *   KEY  getLastError()
  *
  * 全局事件（V1.0 规范第 13 条）：
- *   新增 / 修改 / 删除 / 整体替换导入 / 首次初始化示例数据 成功后，
+ *   新增 / 修改 / 删除 / 整体替换导入 / 首次初始化示例数据 / 清空 成功后，
  *   在 document 上派发 'ledger:updated'，detail = { action, payload }
- *   action 取值：add | update | delete | replace | seed
+ *   action 取值：add | update | delete | replace | seed | clear
  *   ⚠ 事件由本模块统一派发，S2/S3/S8 不要再自己 dispatch 一次，
  *     否则同一操作会触发两轮刷新（列表渲染两遍、提示弹两次）。
  *
@@ -38,6 +40,7 @@
   var C = global.LedgerConstants || {};
   var TYPES = C.RECORD_TYPES || { INCOME: 'income', EXPENSE: 'expense' };
   var KEY = global.LEDGER_STORAGE_KEY || C.STORAGE_KEY || 'ledger_records';
+  var CLEARED_KEY = KEY + '__cleared';   // 用户主动清空后不再自动灌示例数据
 
   var MEMORY = [];          // localStorage 不可用时的兜底存储（仅当前页面有效）
   var available = null;     // 惰性检测结果，null 表示还没测过
@@ -306,8 +309,12 @@
    * @param {Array} [records] 不传时自动取 Ledger.DemoData.getRecords()；
    *                          demo-data.js 未加载时不写入，返回 0
    * @returns {Number} 实际写入条数
+   *
+   * 说明：用户点击“清空全部账单”后会留下标记，刷新页面也不再自动灌示例数据，
+   *       需要重新体验示例数据时调用 allowSeedAgain()。
    */
   function seedIfEmpty(records) {
+    if (isCleared()) return 0;
     if (readClean().length > 0) return 0;
 
     var data = records;
@@ -329,9 +336,44 @@
     return clean.length;
   }
 
-  function clearAll() {
-    writeRaw([]);
+  /* -------- “已主动清空”标记：避免示例数据在刷新后又冒出来 -------- */
+
+  function isCleared() {
+    if (!detect()) return false;
+    try {
+      return global.localStorage.getItem(CLEARED_KEY) === '1';
+    } catch (e) {
+      return false;
+    }
   }
+
+  function allowSeedAgain() {
+    if (!detect()) return;
+    try {
+      global.localStorage.removeItem(CLEARED_KEY);
+    } catch (ignore) {}
+  }
+
+  /**
+   * 清空全部账单
+   * @param {{suppressDemo?: Boolean}} [options]
+   *        suppressDemo=true 时留下“已主动清空”标记，刷新后不再自动写入示例数据
+   *        （页面“清空全部账单”按钮传 true）；默认行为是完全重置，示例数据可再次初始化
+   */
+  function clearAll(options) {
+    writeRaw([]);
+    if (options && options.suppressDemo) {
+      if (detect()) {
+        try {
+          global.localStorage.setItem(CLEARED_KEY, '1');
+        } catch (ignore) {}
+      }
+    } else {
+      allowSeedAgain();
+    }
+    emit('clear', { count: 0 });
+  }
+
 
   function isAvailable() {
     return detect();
@@ -346,6 +388,7 @@
     saveRecords: saveRecords,
     seedIfEmpty: seedIfEmpty,
     clearAll: clearAll,
+    allowSeedAgain: allowSeedAgain,
     isAvailable: isAvailable,
     makeId: makeId,
     today: today,
