@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="简记 · 个人记账本：记录每一笔收支，按日期、类别、金额筛选统计，并用图表看清钱的去向。">
+  <title>简记 · 个人记账本</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%232563eb'/%3E%3Ctext x='32' y='45' font-size='38' font-family='Arial' font-weight='bold' fill='white' text-anchor='middle'%3E%C2%A5%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <!-- 顶部导航：品牌 + 数据导入导出（S8 提供行为，S1 提供 DOM） -->
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">¥</span>
+          <span class="brand-text">
+            <strong>简记</strong>
+            <span>个人记账本</span>
+          </span>
+        </div>
+        <div class="topbar-actions">
+          <button type="button" class="btn btn-ghost btn-sm" id="btn-import">
+            <span aria-hidden="true">↧</span> 导入数据
+          </button>
+          <button type="button" class="btn btn-soft btn-sm" id="btn-export">
+            <span aria-hidden="true">↥</span> 导出数据
+          </button>
+          <input type="file" id="file-import" accept=".json,application/json" hidden>
+        </div>
+      </div>
+    </header>
+
+    <main class="page">
+      <!-- 概览：本月收入 / 支出 / 结余 / 累计（S4 计算，S1 渲染） -->
+      <section class="summary-section" aria-labelledby="summary-title">
+        <div class="section-head">
+          <div class="section-head-main">
+            <h1 class="section-title" id="summary-title">收支概览</h1>
+            <p class="section-sub" id="summary-sub">正在加载数据…</p>
+          </div>
+          <div class="month-switch" role="group" aria-label="切换统计月份">
+            <button type="button" class="icon-btn" id="btn-prev-month" aria-label="上一个月">‹</button>
+            <button type="button" class="month-label" id="month-label" title="回到本月">—</button>
+            <button type="button" class="icon-btn" id="btn-next-month" aria-label="下一个月">›</button>
+          </div>
+        </div>
+        <div id="summary-container"></div>
+      </section>
+
+      <div class="layout">
+        <!-- S2 记账表单 -->
+        <div class="layout-side">
+          <section class="panel panel-form" aria-labelledby="form-title">
+            <div class="panel-head">
+              <h2 class="panel-title" id="form-title">记一笔</h2>
+              <span class="panel-hint">Ctrl + Enter 保存</span>
+            </div>
+            <div id="form-container"></div>
+          </section>
+        </div>
+
+        <!-- S6 图表分析 -->
+        <div class="layout-main">
+          <section class="charts-section" aria-labelledby="charts-title">
+            <div class="section-head">
+              <div class="section-head-main">
+                <h2 class="section-title" id="charts-title">收支分析</h2>
+                <p class="section-sub" id="charts-sub">—</p>
+              </div>
+            </div>
+            <div id="charts-container"></div>
+          </section>
+        </div>
+      </div>
+
+      <!-- S5 筛选查询 -->
+      <section class="filter-section" aria-labelledby="filter-title">
+        <div class="section-head">
+          <div class="section-head-main">
+            <h2 class="section-title" id="filter-title">账单查询</h2>
+            <p class="section-sub">按类型、类别、日期、金额筛选，下方账单列表与合计同步变化</p>
+          </div>
+        </div>
+        <div id="filter-container"></div>
+      </section>
+
+      <!-- S3 账单明细 -->
+      <section class="records-section" aria-label="账单明细">
+        <div id="records-container"></div>
+      </section>
+    </main>
+
+    <footer class="page-footer">
+      <p class="page-footer-note">数据仅保存在本机浏览器的 LocalStorage 中，不会上传到服务器。</p>
+      <p class="page-footer-actions">
+        <button type="button" class="link-btn" id="btn-restore-demo">恢复示例数据</button>
+        <span aria-hidden="true">·</span>
+        <button type="button" class="link-btn link-btn-danger" id="btn-clear-all">清空全部账单</button>
+      </p>
+    </footer>
+  </div>
+
+  <!-- 轻提示容器（app.js 使用） -->
+  <div class="toast-stack" id="toast-stack" aria-live="polite" aria-atomic="false"></div>
+
+  <!-- 脚本加载顺序遵循《开发规范 V1.0》第 14 节，禁止调换；
+       Chart.js 为 S6 的前置依赖，按 S1 约定放在 finance 之后、charts 之前。 -->
+  <script src="js/constants.js"></script>
+  <script src="js/storage.js"></script>
+  <script src="js/form.js"></script>
+  <script src="js/records.js"></script>
+  <script src="js/finance.js"></script>
+  <script src="vendor/chart.umd.min.js"></script>
+  <script src="js/filter.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/export.js"></script>
+  <script src="js/demo-data.js"></script>
+  <script src="js/app.js"></script>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      if (window.Ledger && window.Ledger.App) window.Ledger.App.init();
+    });
+  </script>
+
+  <script>
+    /* 资源自检：
+       如果只打开了 index.html 一个文件（最常见的原因是直接在压缩包里双击预览，
+       或者只把 index.html 复制到了别处），css/js/vendor 都不在，页面会变成
+       “没穿衣服”的 HTML，很容易被误认为成品就是这样的。
+       这里直接给出看得懂的提示，避免白折腾。 */
+    window.addEventListener('load', function () {
+      var jsOk = !!(window.Ledger && window.Ledger.App);
+      var cssOk = false;
+      try {
+        // 用样式探测代替 document.styleSheets.length：样式表加载失败时该数组仍可能非空
+        var probe = document.createElement('div');
+        probe.className = 'app-shell';
+        probe.style.cssText = 'position:absolute;left:-9999px;top:0';
+        document.body.appendChild(probe);
+        cssOk = window.getComputedStyle(probe).display === 'flex';
+        document.body.removeChild(probe);
+      } catch (e) { cssOk = false; }
+      if (jsOk && cssOk) return;
+
+      var box = document.createElement('div');
+      box.id = 'boot-warning';
+      box.setAttribute('role', 'alert');
+      box.style.cssText = [
+        'position:relative', 'z-index:99999', 'margin:0', 'padding:16px 22px',
+        'background:#fff1f2', 'border-bottom:2px solid #e11d48',
+        'color:#9f1239', 'font-size:14px', 'line-height:1.75',
+        'font-family:-apple-system,"Microsoft YaHei",sans-serif'
+      ].join(';');
+
+      var what = !cssOk && !jsOk ? '样式和脚本都没有加载成功'
+        : (!cssOk ? '样式表没有加载成功' : '页面脚本没有加载成功');
+
+      box.innerHTML =
+        '<strong style="font-size:16px">⚠ ' + what + '</strong>' +
+        '<div style="margin-top:6px">现在打开的只是 <code>index.html</code> 这一个文件。' +
+        '本页面还需要与它<b>同目录</b>的 <code>css/</code>、<code>js/</code>、<code>vendor/</code> 三个文件夹。</div>' +
+        '<div style="margin-top:6px"><b>正确打开方式：</b>把整个 <code>personal-ledger</code> 文件夹' +
+        '（压缩包先<b>解压</b>）放到磁盘上，再双击里面的 <code>index.html</code>；' +
+        '<b>不要</b>在压缩包预览窗口里直接双击 HTML。</div>' +
+        '<div style="margin-top:6px">检查方法：<code>index.html</code> 所在文件夹里应该能同时看到 ' +
+        '<code>css</code>、<code>js</code>、<code>vendor</code> 这三个文件夹。</div>';
+
+      document.body.insertBefore(box, document.body.firstChild);
+    });
+  </script>
+</body>
+</html>
