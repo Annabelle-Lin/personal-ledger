@@ -53,17 +53,17 @@
 
 ### 各模块接口对接进度（S9 跟踪）
 
-| 模块 | 负责人 | 接口状态 | S9 验证情况 |
-|---|---|---|---|
-| storage.js | S7 | ✅ 已确认：LedgerStorage.*，键 ledger_records（组长问题1倾向保留此命名） | ✅ S7 自测 16/16 通过；S9 Node 实测 5/5 通过 |
-| export.js | S8 | ✅ 候选版已收到：exportToJSON()/importFromJSON(file)，依赖 S1 的三个元素（组长问题3待确认） | ⏳ 代码未合并，面板先做接口存在性检查 |
-| finance.js | S4 | ✅ 候选版已收到：Finance.calculateSummary 等，已接入测试配置；**待组长《开发规范.md》终审** | ⏳ 待 S4 代码合并后激活 |
-| form.js | S2 | ✅ 候选版已收到：Ledger.Form.validate/validateAmount（返回 {valid,errors,record}），已接入测试配置；**待终审**（组长问题1/2：命名统一、去掉兜底存储） | ⏳ 待 S2 代码合并后激活 |
-| filter.js | S5 | ⏳ 待 S5 提供函数名 | 待测 |
+> ✅ 15:45 组长发布《开发规范 V1.0》终审版，全组接口已锁定。S9 的 tests.js 已按 V1.0 完成校准：
+> 暴露规范要求的 `Ledger.Tests.runAll() / testStorage() / testFinance() / testFilter() / testImportExport()`，
+> 测试用例覆盖规范第 2/4/5/7/8/10 节，共 17 项。
 
-> 注：组长 15:2X 提出 4 个接口问题（S2/S7 命名不一致、S2 兜底存储、S8 页面元素、脚本加载方式），
-> 正在统一审核接口。S9 已将 S2/S4 候选接口预接入测试配置（命名空间探测做了兼容），
-> 《开发规范.md》终审发布后预计 5 分钟内完成校准。
+| 模块 | 负责人 | 接口状态（以 V1.0 为准） | S9 验证情况 |
+|---|---|---|---|
+| storage.js | S7 | ✅ LedgerStorage.*（V1.0 第4节） | ✅ S7 自测 16/16；S9 Node 实测 6/6 通过（含统一数据结构校验） |
+| form.js | S2 | ✅ Ledger.Form.validate/validateAmount 等（V1.0 第5节） | ⏳ 待代码合并后激活（4 项用例已就绪） |
+| finance.js | S4 | ✅ Finance.calculateSummary 等（V1.0 第7节，返回键名 balance） | ⏳ 待代码合并后激活（2 项用例已就绪） |
+| filter.js | S5 | ✅ Ledger.Filter.apply(records, conditions)（V1.0 第8节） | ⏳ 待代码合并后激活（4 项用例已就绪） |
+| export.js | S8 | ✅ exportToJSON()/importFromJSON(file)（V1.0 第10节） | ⏳ 待代码合并后激活（接口存在性检查） |
 
 ---
 
