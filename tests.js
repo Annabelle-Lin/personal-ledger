@@ -15,20 +15,34 @@
  * ========================================================================= */
 
 /* -------------------- 项目函数名配置（只改这里！） -------------------- */
-const API = {
-  // storage.js 提供的函数（来自方案文档）
-  getRecords:   typeof getRecords   !== 'undefined' ? getRecords   : null,
-  saveRecords:  typeof saveRecords  !== 'undefined' ? saveRecords  : null,
-  addRecord:    typeof addRecord    !== 'undefined' ? addRecord    : null,
-  deleteRecord: typeof deleteRecord !== 'undefined' ? deleteRecord : null,
+// ✅ S7 storage 已确认（2026-11-07 S7 提供）：
+//    全局对象 LedgerStorage，方法：getRecords / addRecord / updateRecord /
+//    deleteRecord / saveRecords / seedIfEmpty，存储键 ledger_records
+// ⏳ S2 form / S4 finance / S5 filter 接口待确认，下方仍为占位，确认后补上即可
+function _bindAll(ns, names) {
+  const out = {};
+  if (ns) names.forEach(n => { if (typeof ns[n] === 'function') out[n] = ns[n].bind(ns); });
+  return out;
+}
+const _storage = (typeof LedgerStorage !== 'undefined') ? LedgerStorage : null;
+const _STORAGE_API = _bindAll(_storage, ['getRecords', 'addRecord', 'updateRecord', 'deleteRecord', 'saveRecords', 'seedIfEmpty']);
 
-  // finance.js：计算总收入/总支出/余额（函数名请按你们实际代码改）
+const API = {
+  // storage.js（S7）：已按真实接口对接
+  getRecords:   _STORAGE_API.getRecords   || null,
+  saveRecords:  _STORAGE_API.saveRecords  || null,
+  addRecord:    _STORAGE_API.addRecord    || null,
+  updateRecord: _STORAGE_API.updateRecord || null,
+  deleteRecord: _STORAGE_API.deleteRecord || null,
+  seedIfEmpty:  _STORAGE_API.seedIfEmpty  || null,
+
+  // finance.js（S4）：计算总收入/总支出/余额（接口待 S4 确认）
   calculateTotals: typeof calculateTotals !== 'undefined' ? calculateTotals : null,
 
-  // filter.js：按条件筛选记录（函数名请按你们实际代码改）
+  // filter.js（S5）：按条件筛选记录（接口待 S5 确认）
   filterRecords: typeof filterRecords !== 'undefined' ? filterRecords : null,
 
-  // form.js：金额/必填校验（返回 true=合法，false=非法；函数名请按实际改）
+  // form.js（S2）：金额/必填校验（接口待 S2 确认）
   validateAmount: typeof validateAmount !== 'undefined' ? validateAmount : null,
   validateForm:   typeof validateForm   !== 'undefined' ? validateForm   : null,
 };
@@ -105,6 +119,23 @@ test('storage：deleteRecord 能删除指定记录', () => {
   API.addRecord(r);
   API.deleteRecord(r.id);
   assert(!API.getRecords().some(x => x.id === r.id), '删除后记录不应再出现');
+});
+
+test('storage：updateRecord 能修改已有记录', () => {
+  assert(API.addRecord && API.updateRecord && API.getRecords, 'storage 函数未定义');
+  const r = makeRecord({ amount: 10, note: '改之前' });
+  API.addRecord(r);
+  API.updateRecord(r.id, { amount: 99, note: '改之后' });
+  const found = API.getRecords().find(x => x.id === r.id);
+  assert(found, '更新后记录应仍存在');
+  assert(Math.abs(found.amount - 99) < 1e-9 && found.note === '改之后', '更新后的字段值应生效');
+});
+
+test('storage：seedIfEmpty 空数据时能填充演示数据', () => {
+  assert(API.saveRecords && API.seedIfEmpty && API.getRecords, 'storage 函数未定义');
+  API.saveRecords([]);          // 先清空
+  API.seedIfEmpty();            // 应自动补演示数据
+  assert(API.getRecords().length > 0, '空数据执行 seedIfEmpty 后应有记录');
 });
 
 test('storage：刷新持久化（LocalStorage 真正存住了）', () => {
